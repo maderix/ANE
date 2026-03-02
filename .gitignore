@@ -1,0 +1,27 @@
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# Worktrees
+.worktrees/
+worktrees/
+
+# Log files
+*.log
+firebase-debug.log
+
+# Compiled binaries
+training/train
+training/train_large
+training/probe_*
+training/*.dSYM/
+
+# Training data (large binary files)
+training/*.bin
+
+# ANE compiled artifacts
+**/*.mlmodelc/
+**/*.mlpackage/
+
+# External assets (models, datasets)
+assets/

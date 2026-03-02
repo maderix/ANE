@@ -277,6 +277,7 @@ static NSData *g_mask_blob = nil;
 static NSData *get_mask_blob(void) {
     if (!g_mask_blob) {
         _Float16 *mask = (_Float16*)calloc(SEQ*SEQ, sizeof(_Float16));
+        if (!mask) { fprintf(stderr, "OOM: calloc(mask %dx%d)\n", SEQ, SEQ); abort(); }  // HIGH-04
         for(int t=0;t<SEQ;t++) for(int t2=0;t2<SEQ;t2++)
             mask[t*SEQ+t2] = (t2<=t) ? (_Float16)0.0f : (_Float16)(-65504.0f);
         g_mask_blob = build_blob_fp16(mask, SEQ*SEQ);

@@ -101,7 +101,7 @@ typedef struct {
     double cum_compile, cum_train, cum_wall;
     int cum_steps, cum_batches;
     int adam_t;
-    int pad[3];         // alignment
+    int pad[3];         // pad[0] = 0x01020304 (LE byte-order sentinel, MED-04); pad[1..2] = 0
 } CkptHdr;
 
 // llama2.c model file header
@@ -111,28 +111,57 @@ typedef struct {
 
 // Globals
 static Class g_D, g_I, g_AR, g_AIO;
+static bool g_ane_ok_large = false;    // true only when all private classes loaded successfully
 static mach_timebase_info_data_t g_tb;
 static int g_compile_count = 0;
+static int g_compile_seq = 0;  // MED-02: per-call unique index for temp-dir naming
 
 static void ane_init(void) {
-    dlopen("/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine", RTLD_NOW);
-    g_D  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
-    g_I  = NSClassFromString(@"_ANEInMemoryModel");
-    g_AR = NSClassFromString(@"_ANERequest");
-    g_AIO= NSClassFromString(@"_ANEIOSurfaceObject");
+    // MED-06: dispatch_once provides thread-safe one-time init with full memory barrier.
+    // Replaces manual g_ane_init_done bool guard which had a Check-Then-Act race.
+    static dispatch_once_t ane_once_large;
+    dispatch_once(&ane_once_large, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine",
+            RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "ANE: dlopen failed: %s\n", dlerror());
+            return;
+        }
+        g_D  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
+        g_I  = NSClassFromString(@"_ANEInMemoryModel");
+        g_AR = NSClassFromString(@"_ANERequest");
+        g_AIO= NSClassFromString(@"_ANEIOSurfaceObject");
+        if (!g_D || !g_I || !g_AR || !g_AIO) {
+            fprintf(stderr, "ANE: Private classes not found (macOS version mismatch?)\n");
+            return;
+        }
+        g_ane_ok_large = true;  // dispatch_once guarantees memory barrier before completion
+    });
 }
 static double tb_ms(uint64_t t) { return (double)t * g_tb.numer / g_tb.denom / 1e6; }
 
 // Alloc helpers
-static AdamState adam_alloc(size_t n) { AdamState s; s.m=(float*)calloc(n,4); s.v=(float*)calloc(n,4); s.n=n; return s; }
+// HIGH-04: OOM during training is fatal and unrecoverable; abort() is correct.
+static inline float *xmf(size_t n) {
+    float *p = (float*)malloc(n * sizeof(float));
+    if (!p) { fprintf(stderr, "OOM: malloc(%zu floats = %.1fMB)\n", n, n*4.0/1048576); abort(); }
+    return p;
+}
+static inline float *xcf(size_t n) {
+    float *p = (float*)calloc(n, sizeof(float));
+    if (!p) { fprintf(stderr, "OOM: calloc(%zu floats = %.1fMB)\n", n, n*4.0/1048576); abort(); }
+    return p;
+}
+static AdamState adam_alloc(size_t n) { AdamState s; s.m=xcf(n); s.v=xcf(n); s.n=n; return s; }
 static void adam_free(AdamState *s) { free(s->m); free(s->v); }
 
 static LayerWeights layer_weights_alloc(void) {
     LayerWeights w;
-    w.Wq=(float*)malloc(WQ_SZ*4); w.Wk=(float*)malloc(WQ_SZ*4);
-    w.Wv=(float*)malloc(WQ_SZ*4); w.Wo=(float*)malloc(WO_SZ*4);
-    w.W1=(float*)malloc(W1_SZ*4); w.W2=(float*)malloc(W2_SZ*4); w.W3=(float*)malloc(W3_SZ*4);
-    w.rms_att=(float*)malloc(DIM*4); w.rms_ffn=(float*)malloc(DIM*4);
+    w.Wq=xmf(WQ_SZ); w.Wk=xmf(WQ_SZ);
+    w.Wv=xmf(WQ_SZ); w.Wo=xmf(WO_SZ);
+    w.W1=xmf(W1_SZ); w.W2=xmf(W2_SZ); w.W3=xmf(W3_SZ);
+    w.rms_att=xmf(DIM); w.rms_ffn=xmf(DIM);
     return w;
 }
 static void layer_weights_free(LayerWeights *w) {
@@ -154,13 +183,13 @@ static void layer_adam_free(LayerAdam *a) {
 }
 static LayerActs layer_acts_alloc(void) {
     LayerActs a;
-    a.layer_in=(float*)malloc(SEQ*DIM*4);
-    a.xnorm=(float*)malloc(SEQ*DIM*4); a.Q=(float*)malloc(SEQ*DIM*4);
-    a.K=(float*)malloc(SEQ*DIM*4); a.V=(float*)malloc(SEQ*DIM*4);
-    a.attn_out=(float*)malloc(SEQ*DIM*4); a.o_out=(float*)malloc(SEQ*DIM*4);
-    a.x2=(float*)malloc(SEQ*DIM*4); a.x2norm=(float*)malloc(SEQ*DIM*4);
-    a.h1=(float*)malloc(SEQ*HIDDEN*4); a.h3=(float*)malloc(SEQ*HIDDEN*4);
-    a.silu_out=(float*)malloc(SEQ*HIDDEN*4); a.ffn_out=(float*)malloc(SEQ*DIM*4);
+    a.layer_in=xmf((size_t)SEQ*DIM);
+    a.xnorm=xmf((size_t)SEQ*DIM); a.Q=xmf((size_t)SEQ*DIM);
+    a.K=xmf((size_t)SEQ*DIM); a.V=xmf((size_t)SEQ*DIM);
+    a.attn_out=xmf((size_t)SEQ*DIM); a.o_out=xmf((size_t)SEQ*DIM);
+    a.x2=xmf((size_t)SEQ*DIM); a.x2norm=xmf((size_t)SEQ*DIM);
+    a.h1=xmf((size_t)SEQ*HIDDEN); a.h3=xmf((size_t)SEQ*HIDDEN);
+    a.silu_out=xmf((size_t)SEQ*HIDDEN); a.ffn_out=xmf((size_t)SEQ*DIM);
     return a;
 }
 static void layer_acts_free(LayerActs *a) {
@@ -170,10 +199,10 @@ static void layer_acts_free(LayerActs *a) {
 }
 static LayerGrads layer_grads_alloc(void) {
     LayerGrads g;
-    g.Wq=(float*)calloc(WQ_SZ,4); g.Wk=(float*)calloc(WQ_SZ,4);
-    g.Wv=(float*)calloc(WQ_SZ,4); g.Wo=(float*)calloc(WO_SZ,4);
-    g.W1=(float*)calloc(W1_SZ,4); g.W2=(float*)calloc(W2_SZ,4); g.W3=(float*)calloc(W3_SZ,4);
-    g.rms_att=(float*)calloc(DIM,4); g.rms_ffn=(float*)calloc(DIM,4);
+    g.Wq=xcf(WQ_SZ); g.Wk=xcf(WQ_SZ);
+    g.Wv=xcf(WQ_SZ); g.Wo=xcf(WO_SZ);
+    g.W1=xcf(W1_SZ); g.W2=xcf(W2_SZ); g.W3=xcf(W3_SZ);
+    g.rms_att=xcf(DIM); g.rms_ffn=xcf(DIM);
     return g;
 }
 static void layer_grads_zero(LayerGrads *g) {

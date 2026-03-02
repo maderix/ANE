@@ -19,16 +19,31 @@ typedef struct {
 } ANEKernel;
 
 static Class g_ANEDesc, g_ANEInMem, g_ANEReq, g_ANEIO;
-static bool g_ane_loaded = false;
+static bool g_ane_ok = false;  // true only when all private classes loaded successfully
 
 static void ane_init(void) {
-    if (g_ane_loaded) return;
-    dlopen("/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine", RTLD_NOW);
-    g_ANEDesc  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
-    g_ANEInMem = NSClassFromString(@"_ANEInMemoryModel");
-    g_ANEReq   = NSClassFromString(@"_ANERequest");
-    g_ANEIO    = NSClassFromString(@"_ANEIOSurfaceObject");
-    g_ane_loaded = true;
+    // MED-06: dispatch_once is Apple's canonical thread-safe one-time init pattern.
+    // It provides a full memory barrier and is lock-free after the first call.
+    // Replaces manual g_ane_loaded bool guard which had a Check-Then-Act race.
+    static dispatch_once_t ane_once;
+    dispatch_once(&ane_once, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine",
+            RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "ANE: dlopen failed: %s\n", dlerror());
+            return;
+        }
+        g_ANEDesc  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
+        g_ANEInMem = NSClassFromString(@"_ANEInMemoryModel");
+        g_ANEReq   = NSClassFromString(@"_ANERequest");
+        g_ANEIO    = NSClassFromString(@"_ANEIOSurfaceObject");
+        if (!g_ANEDesc || !g_ANEInMem || !g_ANEReq || !g_ANEIO) {
+            fprintf(stderr, "ANE: Private classes not found (macOS version mismatch?)\n");
+            return;
+        }
+        g_ane_ok = true;  // dispatch_once guarantees memory barrier before completion
+    });
 }
 
 static IOSurfaceRef ane_create_surface(size_t bytes) {
@@ -50,6 +65,7 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
                                int nInputs, size_t *inputSizes,
                                int nOutputs, size_t *outputSizes) {
     ane_init();
+    if (!g_ane_ok) { fprintf(stderr, "ANE: not available\n"); return NULL; }  // CRIT-01/02
     NSError *e = nil;
 
     NSDictionary *wdict = nil;
@@ -63,10 +79,16 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
 
     id mdl = ((id(*)(Class,SEL,id))objc_msgSend)(
         g_ANEInMem, @selector(inMemoryModelWithDescriptor:), desc);
+    if (!mdl) { fprintf(stderr, "ANE: inMemoryModel allocation failed\n"); return NULL; }  // CRIT-02
 
     // Pre-populate temp dir with MIL + weights
     id hx = ((id(*)(id,SEL))objc_msgSend)(mdl, @selector(hexStringIdentifier));
-    NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:hx];
+    // MED-02: pid + atomic sequence counter make the directory unique per process and
+    // per call, preventing TOCTOU conflicts when two instances compile the same model.
+    static int ane_compile_seq = 0;
+    int seq = __sync_fetch_and_add(&ane_compile_seq, 1);  // atomic, consistent with g_compile_count
+    NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"ANE_%d_%d_%@", getpid(), seq, hx]];
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:[td stringByAppendingPathComponent:@"weights"]
         withIntermediateDirectories:YES attributes:nil error:nil];
@@ -88,18 +110,23 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
     }
 
     ANEKernel *k = calloc(1, sizeof(ANEKernel));
+    if (!k) { fprintf(stderr, "OOM: calloc(ANEKernel)\n"); abort(); }  // HIGH-04
     k->model = mdl;
     k->tmpDir = td;
     k->nInputs = nInputs;
     k->nOutputs = nOutputs;
     k->inputBytes = malloc(nInputs * sizeof(size_t));
+    if (!k->inputBytes) { fprintf(stderr, "OOM: malloc(inputBytes)\n"); abort(); }  // HIGH-04
     k->outputBytes = malloc(nOutputs * sizeof(size_t));
+    if (!k->outputBytes) { fprintf(stderr, "OOM: malloc(outputBytes)\n"); abort(); }  // HIGH-04
     memcpy(k->inputBytes, inputSizes, nInputs * sizeof(size_t));
     memcpy(k->outputBytes, outputSizes, nOutputs * sizeof(size_t));
 
     // Create IOSurfaces
     k->ioInputs = malloc(nInputs * sizeof(IOSurfaceRef));
+    if (!k->ioInputs) { fprintf(stderr, "OOM: malloc(ioInputs)\n"); abort(); }  // HIGH-04
     k->ioOutputs = malloc(nOutputs * sizeof(IOSurfaceRef));
+    if (!k->ioOutputs) { fprintf(stderr, "OOM: malloc(ioOutputs)\n"); abort(); }  // HIGH-04
     for (int i = 0; i < nInputs; i++)
         k->ioInputs[i] = ane_create_surface(inputSizes[i]);
     for (int i = 0; i < nOutputs; i++)
@@ -128,13 +155,19 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
 }
 
 static void ane_write_input(ANEKernel *k, int idx, const void *data, size_t bytes) {
-    IOSurfaceLock(k->ioInputs[idx], 0, NULL);
+    if (IOSurfaceLock(k->ioInputs[idx], 0, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(write) failed — surface write skipped\n");
+        return;
+    }
     memcpy(IOSurfaceGetBaseAddress(k->ioInputs[idx]), data, bytes);
     IOSurfaceUnlock(k->ioInputs[idx], 0, NULL);
 }
 
 static void ane_read_output(ANEKernel *k, int idx, void *data, size_t bytes) {
-    IOSurfaceLock(k->ioOutputs[idx], kIOSurfaceLockReadOnly, NULL);
+    if (IOSurfaceLock(k->ioOutputs[idx], kIOSurfaceLockReadOnly, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(read) failed — output read skipped\n");
+        return;
+    }
     memcpy(data, IOSurfaceGetBaseAddress(k->ioOutputs[idx]), bytes);
     IOSurfaceUnlock(k->ioOutputs[idx], kIOSurfaceLockReadOnly, NULL);
 }
