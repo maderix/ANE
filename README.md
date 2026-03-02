@@ -4,7 +4,7 @@ You might be asking, "why the FUCK would you pick GPT2?"
 
 Have you read the art bro? Have you? Nah. I doubt it.
 
-GPT2 had more sole in it's theoretical pinky finger than all of us combined. 
+GPT2 had more soul in it's theoretical pinky finger than all of us combined. 
 
 But I digress..
 
@@ -117,4 +117,5 @@ This project is independent research into Apple Neural Engine architecture. It u
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
 
