@@ -112,6 +112,7 @@ static float cross_entropy_loss(float *dlogits, const float *logits, const uint1
 static void embed_lookup(float *x, const float *embed, const uint16_t *tokens, int dim, int seq) {
     for (int t = 0; t < seq; t++) {
         int tok = tokens[t];
+        if (tok >= VOCAB) { tok = 0; }  // HIGH-01: clamp invalid token -> position 0
         for (int d = 0; d < dim; d++) {
             x[d*seq + t] = embed[tok*dim + d];
         }
