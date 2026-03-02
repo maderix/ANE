@@ -64,11 +64,27 @@ Branch `fix/crit-security-findings` erstellt. Alle 4 CRIT-Findings behoben:
 **Simulation:** 3 Iterationsrunden (CRIT-03 benötigte 3 Runs), Gesamtbewertung 96.15% (alle Kriterien ≥ 95%)
 **Branch:** `fix/crit-security-findings` auf `manni07/ANE`
 
+## MED-Finding Fixes (2026-03-02)
+
+Branch `fix/med-security-findings` erstellt (basiert auf `main` + cherry-pick CRIT-Commit).
+Alle 6 MED-Findings behoben. Simulation: 2–3 Iterationsrunden, Gesamtbewertung 95.93% (alle Kriterien ≥ 95%).
+
+| Finding | Dateien | Kernänderung |
+|---------|---------|-------------|
+| MED-01 | `stories_io.h`, `ane_runtime.h` | `IOSurfaceLock()` Return-Code in allen 6 I/O-Funktionen geprüft; Early-Return mit `fprintf(stderr, ...)` |
+| MED-02 | `stories_io.h`, `ane_runtime.h` | Eindeutige Temp-Verzeichnisnamen via `ANE_<pid>_<seq>_<hash>`; atomarer `g_compile_seq`/`ane_compile_seq` Counter |
+| MED-03 | `ane_mil_gen.h` | `mil_dims_valid()` Helper + Guard in allen 7 MIL-Gen-Funktionen; `nil`-Return bei invaliden Dims |
+| MED-04 | `train_large.m`, `stories_config.h` | `CkptHdr.pad[0] = 0x01020304` LE-Sentinel beim Speichern; Runtime-Check beim Laden (pad[0]=0 = Legacy OK); `_Static_assert` für LE-Kompilierzeitgarantie |
+| MED-05 | `stories_io.h` | `_Static_assert(SEQ % 8 == 0, ...)` + Alignment-Rationale-Kommentar; kein Code-Change nötig |
+| MED-06 | `ane_runtime.h`, `stories_config.h` | `dispatch_once` ersetzt manuelle `g_ane_loaded`/`g_ane_init_done`-Guards; thread-sichere One-Time-Init; 2 globale Variablen entfernt |
+
+**Branch:** `fix/med-security-findings` auf `manni07/ANE`
+
 ## Status
 
 | Finding-Typ | Anzahl | Status |
 |-------------|--------|--------|
 | KRITISCH (CRIT-01–04) | 4 | ✅ BEHOBEN |
 | HOCH (HIGH-01–05) | 5 | Offen |
-| MITTEL (MED-01–06) | 6 | Offen |
+| MITTEL (MED-01–06) | 6 | ✅ BEHOBEN |
 | NIEDRIG (LOW-01–04) | 4 | ✅ BEHOBEN |

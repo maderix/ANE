@@ -125,6 +125,7 @@ static void save_checkpoint(const char *path, int step, int total_steps, float l
     h.lr = lr; h.loss = loss;
     h.cum_compile = cc; h.cum_train = ct; h.cum_wall = cw;
     h.cum_steps = cs; h.cum_batches = cb; h.adam_t = adam_t;
+    h.pad[0] = 0x01020304;  // byte-order sentinel (MED-04): LE marker, see CkptHdr
     fwrite(&h, sizeof(h), 1, f);
     // Per-layer weights + adam
     for (int L = 0; L < NLAYERS; L++) {
@@ -163,6 +164,14 @@ static bool load_checkpoint(const char *path, int *step, int *total_steps, float
         fclose(f); return false;
     }
     if (h.magic != 0x424C5A54 || h.version != 2) { fclose(f); return false; }
+    // MED-04: Byte-order check. pad[0]=0 = legacy checkpoint (no sentinel, accept).
+    // pad[0]=0x01020304 = LE ok. Anything else = big-endian or corrupt checkpoint.
+    _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
+        "Checkpoint format is little-endian (Apple Silicon only)");
+    if (h.pad[0] != 0 && h.pad[0] != 0x01020304) {
+        fprintf(stderr, "load_checkpoint: byte-order mismatch (big-endian checkpoint?)\n");
+        fclose(f); return false;
+    }
     *step = h.step; *total_steps = h.total_steps; *lr = h.lr; *loss = h.loss;
     *cc = h.cum_compile; *ct = h.cum_train; *cw = h.cum_wall;
     *cs = h.cum_steps; *cb = h.cum_batches; *adam_t = h.adam_t;

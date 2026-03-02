@@ -5,10 +5,22 @@
 #include <string.h>
 #include <math.h>
 
+// MED-03: Validate MIL dimensions before use in ANE compiler.
+// Callers use config values already validated by CRIT-03 gatekeeper (model.h/train_large.m),
+// but this guard defends against future internal programming errors.
+static bool mil_dims_valid(int a, int b) {
+    if (a <= 0 || a > 65536 || b <= 0 || b > 65536) {
+        fprintf(stderr, "ane_mil_gen: invalid dims %d/%d (must be 1..65536)\n", a, b);
+        return false;
+    }
+    return true;
+}
+
 // Build an FP16 weight blob with the required header structure.
 // weights_f32: source weights in row-major [out_ch, in_ch]
 // Returns NSData with header + FP16 weights
 static NSData *mil_build_weight_blob(const float *weights_f32, int out_ch, int in_ch) {
+    if (!mil_dims_valid(out_ch, in_ch)) return nil;  // MED-03
     NSUInteger wsize = (NSUInteger)out_ch * in_ch * 2; // FP16
     NSUInteger total = 64 + 64 + wsize; // global header + chunk header + data
     uint8_t *buf = (uint8_t*)calloc(total, 1);
@@ -30,6 +42,9 @@ static NSData *mil_build_weight_blob(const float *weights_f32, int out_ch, int i
 // Input W: [1, out_ch, in_ch] fp32
 // Output:  [1, out_ch, spatial] fp32
 static NSString *mil_gen_matmul(int in_ch, int out_ch, int spatial) {
+    if (!mil_dims_valid(in_ch, out_ch) || spatial <= 0 || spatial > 65536) {
+        fprintf(stderr, "ane_mil_gen: invalid spatial %d\n", spatial); return nil;
+    }
     return [NSString stringWithFormat:
         @"program(1.3)\n"
         "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
@@ -54,6 +69,9 @@ static NSString *mil_gen_matmul(int in_ch, int out_ch, int spatial) {
 
 // Keep the baked-weight version for reference (used in inference-only scenarios)
 static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
+    if (!mil_dims_valid(in_ch, out_ch) || spatial <= 0 || spatial > 65536) {
+        fprintf(stderr, "ane_mil_gen: invalid spatial %d\n", spatial); return nil;
+    }
     return [NSString stringWithFormat:
         @"program(1.3)\n"
         "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
@@ -87,6 +105,9 @@ static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
 // Weight blob layout: Wq[dim,dim] @ offset 64, Wk @ offset 64+cs, Wv @ offset 64+2*cs
 // where cs = 64 + dim*dim*2
 static NSString *mil_gen_qkv(int dim, int spatial) {
+    if (!mil_dims_valid(dim, dim) || spatial <= 0 || spatial > 65536) {
+        fprintf(stderr, "ane_mil_gen: invalid spatial %d\n", spatial); return nil;
+    }
     NSUInteger cs = 64 + (NSUInteger)dim * dim * 2;
     return [NSString stringWithFormat:
         @"program(1.3)\n"
@@ -130,6 +151,7 @@ static NSString *mil_gen_qkv(int dim, int spatial) {
 
 // Build weight blob for fused QKV (3 weight matrices concatenated)
 static NSData *mil_build_qkv_weight_blob(const float *wq, const float *wk, const float *wv, int dim) {
+    if (!mil_dims_valid(dim, dim)) return nil;  // MED-03
     NSUInteger wsize = (NSUInteger)dim * dim * 2;
     NSUInteger cs = 64 + wsize;
     NSUInteger total = 64 + 3 * cs;
@@ -151,6 +173,7 @@ static NSData *mil_build_qkv_weight_blob(const float *wq, const float *wk, const
 
 // Build weight blob for fused FFN up (w1 + w3, both [hidden_dim, dim])
 static NSData *mil_build_ffn_up_weight_blob(const float *w1, const float *w3, int hidden_dim, int dim) {
+    if (!mil_dims_valid(hidden_dim, dim)) return nil;  // MED-03
     NSUInteger wsize = (NSUInteger)hidden_dim * dim * 2;
     NSUInteger cs = 64 + wsize;
     NSUInteger total = 64 + 2 * cs;
@@ -172,6 +195,9 @@ static NSData *mil_build_ffn_up_weight_blob(const float *w1, const float *w3, in
 
 // Generate MIL for fused FFN up: w1 + w3 parallel convs
 static NSString *mil_gen_ffn_up(int dim, int hidden_dim, int spatial) {
+    if (!mil_dims_valid(dim, hidden_dim) || spatial <= 0 || spatial > 65536) {
+        fprintf(stderr, "ane_mil_gen: invalid spatial %d\n", spatial); return nil;
+    }
     NSUInteger cs = 64 + (NSUInteger)hidden_dim * dim * 2;
     return [NSString stringWithFormat:
         @"program(1.3)\n"
