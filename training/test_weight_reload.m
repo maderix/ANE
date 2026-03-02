@@ -34,30 +34,42 @@ static NSData *build_weight_blob(_Float16 *w, int rows, int cols) {
     return [NSData dataWithBytesNoCopy:b length:tot freeWhenDone:YES];
 }
 
-// Generate MIL for a simple conv: fp32 in → cast fp16 → conv → cast fp32 out
+static int g_fp16_io = 0;  // M1/M2: cast op unsupported, use fp16 I/O directly
+
+// Generate MIL for a simple conv (fp16 I/O when g_fp16_io, else fp32 with casts)
 static NSString *gen_mil(int ch, int sp) {
+    if (g_fp16_io) {
+        return [NSString stringWithFormat:
+            @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, 1, %d]> x) {\n"
+            "        tensor<string, []> pt = const()[name=tensor<string, []>(\"pt\"), val=tensor<string, []>(\"valid\")];\n"
+            "        tensor<int32, [2]> st = const()[name=tensor<string, []>(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
+            "        tensor<int32, [4]> pd = const()[name=tensor<string, []>(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
+            "        tensor<int32, [2]> dl = const()[name=tensor<string, []>(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
+            "        tensor<int32, []> gr = const()[name=tensor<string, []>(\"gr\"), val=tensor<int32, []>(1)];\n"
+            "        tensor<fp16, [%d,%d,1,1]> W = const()[name=tensor<string, []>(\"W\"), "
+            "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=tensor<string, []>(\"@model_path/weights/weight.bin\"), offset=tensor<uint64, []>(64)))];\n"
+            "        tensor<fp16, [1,%d,1,%d]> y = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x)"
+            "[name=tensor<string, []>(\"conv\")];\n"
+            "    } -> (y);\n}\n", ch, sp, ch, ch, ch, ch, ch, sp];
+    }
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
-        "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-        "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-        "{\"coremltools-version\", \"9.0\"}})]\n"
-        "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
-        "        string pt = const()[name=string(\"pt\"), val=string(\"valid\")];\n"
-        "        tensor<int32, [2]> st = const()[name=string(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
-        "        tensor<int32, [4]> pd = const()[name=string(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
-        "        tensor<int32, [2]> dl = const()[name=string(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
-        "        int32 gr = const()[name=string(\"gr\"), val=int32(1)];\n"
-        "        string to16 = const()[name=string(\"to16\"), val=string(\"fp16\")];\n"
-        "        tensor<fp16, [1,%d,1,%d]> x16 = cast(dtype=to16,x=x)[name=string(\"cin\")];\n"
-        "        tensor<fp16, [%d,%d,1,1]> W = const()[name=string(\"W\"), "
-        "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=string(\"@model_path/weights/weight.bin\"), offset=uint64(64)))];\n"
+        @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+        "    func main<ios16>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "        tensor<string, []> pt = const()[name=tensor<string, []>(\"pt\"), val=tensor<string, []>(\"valid\")];\n"
+        "        tensor<int32, [2]> st = const()[name=tensor<string, []>(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
+        "        tensor<int32, [4]> pd = const()[name=tensor<string, []>(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
+        "        tensor<int32, [2]> dl = const()[name=tensor<string, []>(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
+        "        tensor<int32, []> gr = const()[name=tensor<string, []>(\"gr\"), val=tensor<int32, []>(1)];\n"
+        "        tensor<string, []> to16 = const()[name=tensor<string, []>(\"to16\"), val=tensor<string, []>(\"fp16\")];\n"
+        "        tensor<fp16, [1,%d,1,%d]> x16 = cast(dtype=to16,x=x)[name=tensor<string, []>(\"cin\")];\n"
+        "        tensor<fp16, [%d,%d,1,1]> W = const()[name=tensor<string, []>(\"W\"), "
+        "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=tensor<string, []>(\"@model_path/weights/weight.bin\"), offset=tensor<uint64, []>(64)))];\n"
         "        tensor<fp16, [1,%d,1,%d]> y16 = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x16)"
-        "[name=string(\"conv\")];\n"
-        "        string to32 = const()[name=string(\"to32\"), val=string(\"fp32\")];\n"
-        "        tensor<fp32, [1,%d,1,%d]> y = cast(dtype=to32,x=y16)[name=string(\"cout\")];\n"
-        "    } -> (y);\n"
-        "}\n", ch, sp, ch, sp, ch, ch, ch, ch, ch, sp, ch, sp];
+        "[name=tensor<string, []>(\"conv\")];\n"
+        "        tensor<string, []> to32 = const()[name=tensor<string, []>(\"to32\"), val=tensor<string, []>(\"fp32\")];\n"
+        "        tensor<fp32, [1,%d,1,%d]> y = cast(dtype=to32,x=y16)[name=tensor<string, []>(\"cout\")];\n"
+        "    } -> (y);\n}\n", ch, sp, ch, sp, ch, ch, ch, ch, ch, sp, ch, sp];
 }
 
 int main() {
@@ -88,6 +100,9 @@ int main() {
         for (int i = 0; i < CH; i++) weightsB[i*CH+i] = (_Float16)3.0f;
 
         NSData *wdataA = build_weight_blob(weightsA, CH, CH);
+        NSFileManager *fm = [NSFileManager defaultManager];
+
+        retry_compile:;
         NSString *mil = gen_mil(CH, SP);
         NSDictionary *weights = @{
             @"@model_path/weights/weight.bin": @{@"offset": @0, @"data": wdataA}
@@ -103,13 +118,18 @@ int main() {
         id mdl = ((id(*)(Class,SEL,id))objc_msgSend)(g_I, @selector(inMemoryModelWithDescriptor:), desc);
         id hx = ((id(*)(id,SEL))objc_msgSend)(mdl, @selector(hexStringIdentifier));
         NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:hx];
-        NSFileManager *fm = [NSFileManager defaultManager];
         [fm createDirectoryAtPath:[td stringByAppendingPathComponent:@"weights"] withIntermediateDirectories:YES attributes:nil error:nil];
         [milData writeToFile:[td stringByAppendingPathComponent:@"model.mil"] atomically:YES];
         [wdataA writeToFile:[td stringByAppendingPathComponent:@"weights/weight.bin"] atomically:YES];
 
         NSError *e = nil;
         BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(compileWithQoS:options:error:), 21, @{}, &e);
+        if (!ok && !g_fp16_io) {
+            printf("[ANE] fp32 compile failed, retrying with fp16 I/O (M1/M2 fallback)\n");
+            g_fp16_io = 1;
+            [fm removeItemAtPath:td error:nil];
+            goto retry_compile;
+        }
         if (!ok) { printf("FAIL: compile: %s\n", [[e description] UTF8String]); return 1; }
         ok = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(loadWithQoS:options:error:), 21, @{}, &e);
         if (!ok) { printf("FAIL: load: %s\n", [[e description] UTF8String]); return 1; }
@@ -117,9 +137,10 @@ int main() {
         printf("  Compile+load: %.1fms\n", compile_ms);
         printf("  tmpDir: %s\n", [td UTF8String]);
 
-        // Build request and IOSurfaces (fp32 I/O)
-        int inBytes = CH * SP * 4;  // fp32
-        int outBytes = CH * SP * 4;
+        // Build request and IOSurfaces
+        size_t bpe = g_fp16_io ? 2 : 4;
+        int inBytes = CH * SP * bpe;
+        int outBytes = CH * SP * bpe;
         IOSurfaceRef ioIn = make_surface(inBytes);
         IOSurfaceRef ioOut = make_surface(outBytes);
         id wI = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), ioIn);
@@ -130,10 +151,17 @@ int main() {
 
         // Write input: channel c, spatial s = (c*SP + s + 1) * 0.01
         IOSurfaceLock(ioIn, 0, NULL);
-        float *inp = (float*)IOSurfaceGetBaseAddress(ioIn);
-        for (int c = 0; c < CH; c++)
-            for (int s = 0; s < SP; s++)
-                inp[c*SP+s] = (float)(c*SP + s + 1) * 0.01f;
+        if (g_fp16_io) {
+            _Float16 *inp = (_Float16*)IOSurfaceGetBaseAddress(ioIn);
+            for (int c = 0; c < CH; c++)
+                for (int s = 0; s < SP; s++)
+                    inp[c*SP+s] = (_Float16)((float)(c*SP + s + 1) * 0.01f);
+        } else {
+            float *inp = (float*)IOSurfaceGetBaseAddress(ioIn);
+            for (int c = 0; c < CH; c++)
+                for (int s = 0; s < SP; s++)
+                    inp[c*SP+s] = (float)(c*SP + s + 1) * 0.01f;
+        }
         IOSurfaceUnlock(ioIn, 0, NULL);
 
         // Eval with weights A
@@ -142,13 +170,17 @@ int main() {
         if (!ok) { printf("FAIL: eval: %s\n", e ? [[e description] UTF8String] : "?"); return 1; }
 
         IOSurfaceLock(ioOut, kIOSurfaceLockReadOnly, NULL);
-        float *outA = (float*)IOSurfaceGetBaseAddress(ioOut);
-        printf("  Output A[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", outA[0], outA[1], outA[2], outA[3]);
+        float *outA_copy = (float*)malloc(CH * SP * sizeof(float));
+        if (g_fp16_io) {
+            _Float16 *outA = (_Float16*)IOSurfaceGetBaseAddress(ioOut);
+            for (int i = 0; i < CH*SP; i++) outA_copy[i] = (float)outA[i];
+        } else {
+            float *outA = (float*)IOSurfaceGetBaseAddress(ioOut);
+            memcpy(outA_copy, outA, CH * SP * sizeof(float));
+        }
+        printf("  Output A[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", outA_copy[0], outA_copy[1], outA_copy[2], outA_copy[3]);
         printf("  Output A[%d..%d]: [%.4f, %.4f, %.4f, %.4f]\n", CH*SP-4, CH*SP-1,
-               outA[CH*SP-4], outA[CH*SP-3], outA[CH*SP-2], outA[CH*SP-1]);
-        // Save copy
-        float *outA_copy = (float*)malloc(outBytes);
-        memcpy(outA_copy, outA, outBytes);
+               outA_copy[CH*SP-4], outA_copy[CH*SP-3], outA_copy[CH*SP-2], outA_copy[CH*SP-1]);
         IOSurfaceUnlock(ioOut, kIOSurfaceLockReadOnly, NULL);
 
         // === Step 3: Overwrite weight file with B, unload+load ===
@@ -189,10 +221,17 @@ int main() {
 
         // Re-write same input
         IOSurfaceLock(ioIn, 0, NULL);
-        inp = (float*)IOSurfaceGetBaseAddress(ioIn);
-        for (int c = 0; c < CH; c++)
-            for (int s = 0; s < SP; s++)
-                inp[c*SP+s] = (float)(c*SP + s + 1) * 0.01f;
+        if (g_fp16_io) {
+            _Float16 *inp2 = (_Float16*)IOSurfaceGetBaseAddress(ioIn);
+            for (int c = 0; c < CH; c++)
+                for (int s = 0; s < SP; s++)
+                    inp2[c*SP+s] = (_Float16)((float)(c*SP + s + 1) * 0.01f);
+        } else {
+            float *inp2 = (float*)IOSurfaceGetBaseAddress(ioIn);
+            for (int c = 0; c < CH; c++)
+                for (int s = 0; s < SP; s++)
+                    inp2[c*SP+s] = (float)(c*SP + s + 1) * 0.01f;
+        }
         IOSurfaceUnlock(ioIn, 0, NULL);
 
         // Eval with (possibly reloaded) weights B
@@ -201,16 +240,23 @@ int main() {
         if (!ok) { printf("FAIL: eval after reload: %s\n", e ? [[e description] UTF8String] : "?"); return 1; }
 
         IOSurfaceLock(ioOut, kIOSurfaceLockReadOnly, NULL);
-        float *outB = (float*)IOSurfaceGetBaseAddress(ioOut);
-        printf("  Output B[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", outB[0], outB[1], outB[2], outB[3]);
+        float *outB_f = (float*)malloc(CH * SP * sizeof(float));
+        if (g_fp16_io) {
+            _Float16 *outB = (_Float16*)IOSurfaceGetBaseAddress(ioOut);
+            for (int i = 0; i < CH*SP; i++) outB_f[i] = (float)outB[i];
+        } else {
+            float *outB = (float*)IOSurfaceGetBaseAddress(ioOut);
+            memcpy(outB_f, outB, CH * SP * sizeof(float));
+        }
+        printf("  Output B[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", outB_f[0], outB_f[1], outB_f[2], outB_f[3]);
         printf("  Output B[%d..%d]: [%.4f, %.4f, %.4f, %.4f]\n", CH*SP-4, CH*SP-1,
-               outB[CH*SP-4], outB[CH*SP-3], outB[CH*SP-2], outB[CH*SP-1]);
+               outB_f[CH*SP-4], outB_f[CH*SP-3], outB_f[CH*SP-2], outB_f[CH*SP-1]);
 
         // Check: did the output change?
         bool changed = false;
         float max_diff = 0;
         for (int i = 0; i < CH*SP; i++) {
-            float d = fabsf(outB[i] - outA_copy[i]);
+            float d = fabsf(outB_f[i] - outA_copy[i]);
             if (d > max_diff) max_diff = d;
             if (d > 0.001f) changed = true;
         }
@@ -219,11 +265,12 @@ int main() {
         float max_3x_err = 0;
         for (int i = 0; i < CH*SP; i++) {
             float expected = outA_copy[i] * 3.0f;
-            float err = fabsf(outB[i] - expected);
+            float err = fabsf(outB_f[i] - expected);
             if (err > max_3x_err) max_3x_err = err;
             if (err > 0.1f) correct_3x = false;
         }
         IOSurfaceUnlock(ioOut, kIOSurfaceLockReadOnly, NULL);
+        free(outB_f);
 
         printf("\n=== RESULT ===\n");
         printf("  Max A-B diff: %.6f\n", max_diff);
