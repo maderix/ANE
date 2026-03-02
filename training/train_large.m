@@ -191,6 +191,8 @@ int main(int argc, char *argv[]) {
         float lr = 3e-4f;
         float adam_b1=0.9f, adam_b2=0.999f, adam_eps=1e-8f;
         int adam_t = 0, start_step = 0;
+        int accum_steps = get_accum_steps();
+        int max_compiles = get_max_compiles();
 
         // Parse args
         const char *ckpt_path = CKPT_PATH_DEFAULT;
@@ -270,7 +272,7 @@ int main(int argc, char *argv[]) {
             printf("Params: %.2fM (transformer %.2fM + embed %.2fM)\n", tp/1e6, xfmr_params/1e6, embed_params/1e6);
             printf("Kernels: %d (%d weight-bearing + %d static sdpaBwd2)\n",
                    TOTAL_WEIGHT_KERNELS+NLAYERS, TOTAL_WEIGHT_KERNELS, NLAYERS);
-            printf("Accum %d steps per recompile | Adam LR=%.1e b1=%.1f b2=%.3f\n", ACCUM_STEPS, lr, adam_b1, adam_b2);
+            printf("Accum %d steps per recompile | Adam LR=%.1e b1=%.1f b2=%.3f\n", accum_steps, lr, adam_b1, adam_b2);
             double fwd_f = NLAYERS*(4.0*2*DIM*DIM*SEQ + 2.0*2*DIM*HIDDEN*SEQ + 2.0*HIDDEN*DIM*SEQ);
             double bwd_dx_f = fwd_f, bwd_dw_f = fwd_f;
             double sdpa_f = NLAYERS*2.0*HEADS*5*SEQ*SEQ*HD;
@@ -331,7 +333,7 @@ int main(int argc, char *argv[]) {
         int step = start_step;
         while (step < total_steps) {
             // Check compile budget
-            if (g_compile_count + TOTAL_WEIGHT_KERNELS > MAX_COMPILES) {
+            if (g_compile_count + TOTAL_WEIGHT_KERNELS > max_compiles) {
                 for (int L=0; L<NLAYERS; L++) { free_layer_kernels(&kern[L]); free_kern(sdpaBwd2[L]); }
                 double wall = tb_ms(mach_absolute_time() - t_wall_start);
                 save_checkpoint(ckpt_path, step, total_steps, lr, last_loss,
@@ -357,7 +359,7 @@ int main(int argc, char *argv[]) {
                     compile_ok = false; break;
                 }
             }
-            if (!compile_ok) { g_compile_count = MAX_COMPILES; continue; }
+            if (!compile_ok) { g_compile_count = max_compiles; continue; }
 
             // Re-compile sdpaBwd2 if needed (after exec restart)
             for (int L=0; L<NLAYERS; L++) {
@@ -380,7 +382,7 @@ int main(int argc, char *argv[]) {
             uint64_t tt = mach_absolute_time();
             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
 
-            for (int a=0; a<ACCUM_STEPS && step<total_steps; a++, step++) {
+            for (int a=0; a<accum_steps && step<total_steps; a++, step++) {
                 uint64_t t0,t1;
                 // Sample random position in token data
                 size_t max_pos = n_tokens - SEQ - 1;
