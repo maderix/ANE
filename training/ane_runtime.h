@@ -19,28 +19,31 @@ typedef struct {
 } ANEKernel;
 
 static Class g_ANEDesc, g_ANEInMem, g_ANEReq, g_ANEIO;
-static bool g_ane_loaded = false;
 static bool g_ane_ok = false;  // true only when all private classes loaded successfully
 
 static void ane_init(void) {
-    if (g_ane_loaded) return;
-    g_ane_loaded = true;  // Set first to prevent re-entry (ref: CRIT-01)
-    void *handle = dlopen(
-        "/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine",
-        RTLD_NOW);
-    if (!handle) {
-        fprintf(stderr, "ANE: dlopen failed: %s\n", dlerror());
-        return;
-    }
-    g_ANEDesc  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
-    g_ANEInMem = NSClassFromString(@"_ANEInMemoryModel");
-    g_ANEReq   = NSClassFromString(@"_ANERequest");
-    g_ANEIO    = NSClassFromString(@"_ANEIOSurfaceObject");
-    if (!g_ANEDesc || !g_ANEInMem || !g_ANEReq || !g_ANEIO) {
-        fprintf(stderr, "ANE: Private classes not found (macOS version mismatch?)\n");
-        return;
-    }
-    g_ane_ok = true;
+    // MED-06: dispatch_once is Apple's canonical thread-safe one-time init pattern.
+    // It provides a full memory barrier and is lock-free after the first call.
+    // Replaces manual g_ane_loaded bool guard which had a Check-Then-Act race.
+    static dispatch_once_t ane_once;
+    dispatch_once(&ane_once, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine",
+            RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "ANE: dlopen failed: %s\n", dlerror());
+            return;
+        }
+        g_ANEDesc  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
+        g_ANEInMem = NSClassFromString(@"_ANEInMemoryModel");
+        g_ANEReq   = NSClassFromString(@"_ANERequest");
+        g_ANEIO    = NSClassFromString(@"_ANEIOSurfaceObject");
+        if (!g_ANEDesc || !g_ANEInMem || !g_ANEReq || !g_ANEIO) {
+            fprintf(stderr, "ANE: Private classes not found (macOS version mismatch?)\n");
+            return;
+        }
+        g_ane_ok = true;  // dispatch_once guarantees memory barrier before completion
+    });
 }
 
 static IOSurfaceRef ane_create_surface(size_t bytes) {
@@ -80,7 +83,12 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
 
     // Pre-populate temp dir with MIL + weights
     id hx = ((id(*)(id,SEL))objc_msgSend)(mdl, @selector(hexStringIdentifier));
-    NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:hx];
+    // MED-02: pid + atomic sequence counter make the directory unique per process and
+    // per call, preventing TOCTOU conflicts when two instances compile the same model.
+    static int ane_compile_seq = 0;
+    int seq = __sync_fetch_and_add(&ane_compile_seq, 1);  // atomic, consistent with g_compile_count
+    NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"ANE_%d_%d_%@", getpid(), seq, hx]];
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:[td stringByAppendingPathComponent:@"weights"]
         withIntermediateDirectories:YES attributes:nil error:nil];
@@ -142,13 +150,19 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
 }
 
 static void ane_write_input(ANEKernel *k, int idx, const void *data, size_t bytes) {
-    IOSurfaceLock(k->ioInputs[idx], 0, NULL);
+    if (IOSurfaceLock(k->ioInputs[idx], 0, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(write) failed — surface write skipped\n");
+        return;
+    }
     memcpy(IOSurfaceGetBaseAddress(k->ioInputs[idx]), data, bytes);
     IOSurfaceUnlock(k->ioInputs[idx], 0, NULL);
 }
 
 static void ane_read_output(ANEKernel *k, int idx, void *data, size_t bytes) {
-    IOSurfaceLock(k->ioOutputs[idx], kIOSurfaceLockReadOnly, NULL);
+    if (IOSurfaceLock(k->ioOutputs[idx], kIOSurfaceLockReadOnly, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(read) failed — output read skipped\n");
+        return;
+    }
     memcpy(data, IOSurfaceGetBaseAddress(k->ioOutputs[idx]), bytes);
     IOSurfaceUnlock(k->ioOutputs[idx], kIOSurfaceLockReadOnly, NULL);
 }

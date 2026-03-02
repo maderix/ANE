@@ -223,6 +223,7 @@ static void ane_run(Kern *k) {
 ### [MED-01] IOSurface Lock ohne Fehlerbehandlung
 **Datei:** `training/stories_io.h:62-83`
 **Schweregrad:** MITTEL
+**Status: BEHOBEN** (2026-03-02, Branch `fix/med-security-findings`)
 
 ```c
 IOSurfaceLock(s, 0, NULL);  // Return-Code ignoriert
@@ -235,6 +236,7 @@ IOSurfaceLock(s, 0, NULL);  // Return-Code ignoriert
 ### [MED-02] Temporäres Verzeichnis nicht sicher erstellt (TOCTOU-Risiko)
 **Datei:** `training/ane_runtime.h:68-80`, `training/stories_io.h:94-100`
 **Schweregrad:** MITTEL
+**Status: BEHOBEN** (2026-03-02, Branch `fix/med-security-findings`)
 
 ```objc
 NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:hx];
@@ -248,6 +250,7 @@ TOCTOU-Race zwischen `createDirectoryAtPath` und `writeToFile`. Der `hexStringId
 ### [MED-03] MIL-Text-Generierung ohne Parameter-Validierung
 **Datei:** `training/ane_mil_gen.h:32-52`
 **Schweregrad:** MITTEL
+**Status: BEHOBEN** (2026-03-02, Branch `fix/med-security-findings`)
 
 ```objc
 return [NSString stringWithFormat:
@@ -261,6 +264,7 @@ Negative oder extrem große `in_ch`/`out_ch`/`spatial`-Werte durch fehlerhafte K
 ### [MED-04] Keine Endianness-Prüfung bei Checkpoint-Serialisierung
 **Datei:** `training/train_large.m:110-181`
 **Schweregrad:** MITTEL
+**Status: BEHOBEN** (2026-03-02, Branch `fix/med-security-findings`)
 
 ```c
 h.magic = 0x424C5A54;
@@ -274,6 +278,7 @@ Das `CkptHdr`-Struct wird als binärer Dump ohne Endianness-Marker geschrieben. 
 ### [MED-05] NEON-Vektorisierung ohne Alignment-Garantie
 **Datei:** `training/stories_io.h:41-58`
 **Schweregrad:** MITTEL
+**Status: BEHOBEN** (2026-03-02, Branch `fix/med-security-findings`)
 
 ```c
 float16x8_t h = vld1q_f16((const __fp16*)(src + i));
@@ -286,6 +291,7 @@ Zeiger-Arithmetik mit `ch_off * sp` könnte das für NEON benötigte Alignment v
 ### [MED-06] Globale Variablen ohne Thread-Safety
 **Datei:** `training/stories_io.h`, `training/stories_config.h`
 **Schweregrad:** MITTEL
+**Status: BEHOBEN** (2026-03-02, Branch `fix/med-security-findings`)
 
 ```c
 static bool g_ane_loaded = false;
