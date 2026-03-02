@@ -8,11 +8,9 @@ GPT2 had more soul in it's theoretical pinky finger than all of us combined.
 
 But I digress..
 
-Training neural networks directly on Apple's Neural Engine (ANE) via reverse-engineered private APIs. No CoreML training APIs, no Metal, no GPU — pure ANE compute.
-
 ## What This Is
 
-A from-scratch implementation of transformer training (forward + backward pass) running on the ANE in Apple Silicon. The ANE is a 15.8 TFLOPS (M4) inference accelerator that Apple does not expose for training. This project reverse-engineers the `_ANEClient` / `_ANECompiler` private APIs and the MIL (Model Intermediate Language) format to run custom compute graphs — including backpropagation — directly on ANE hardware.
+A from-scratch implementation of transformer training (forward + backward pass) running on the ANE in Apple Silicon with NEON cpu decode.
 
 I forked diz shit and need to write out everything different so stay tuned.
 
@@ -23,3 +21,4 @@ This project is independent research into Apple Neural Engine architecture. It u
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
