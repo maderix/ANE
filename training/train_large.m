@@ -4,6 +4,7 @@
 #include "stories_io.h"
 #include "stories_mil.h"
 #include "stories_cpu_ops.h"
+#include <limits.h>  // PATH_MAX for realpath() (HIGH-02)
 
 #define CKPT_PATH "ane_stories110M_ckpt.bin"
 #define MODEL_PATH "../../assets/models/stories110M.bin"
@@ -13,6 +14,7 @@
 static bool load_pretrained(LayerWeights *lw, float *rms_final, float *embed, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) { printf("Cannot open %s\n", path); return false; }
+    { char rp[PATH_MAX]; if (realpath(path, rp)) printf("  Model path: %s\n", rp); }  // HIGH-02: audit resolved path
     Llama2Config cfg;
     // Validate config read — gatekeeper before any dimension-based logic (CRIT-03)
     if (fread(&cfg, sizeof(cfg), 1, f) != 1) {
@@ -289,6 +291,15 @@ int main(int argc, char *argv[]) {
         }
 
         // mmap token data
+        // HIGH-02: validate DATA_PATH resolves before open() to give a clear error when CWD is wrong
+        {
+            char rp[PATH_MAX];
+            if (!realpath(DATA_PATH, rp)) {
+                fprintf(stderr, "Data file not found: '%s'\n"
+                        "  Hint: run train_large from the training/ directory.\n", DATA_PATH);
+                return 1;
+            }
+        }
         int data_fd = open(DATA_PATH, O_RDONLY);
         if (data_fd < 0) { printf("Cannot open %s\n", DATA_PATH); return 1; }
         struct stat st; fstat(data_fd, &st);
