@@ -298,6 +298,8 @@ int main(int argc, char *argv[]) {
         size_t n_tokens = data_len / 2;
         if (n_tokens < (size_t)SEQ + 1) {
             fprintf(stderr, "Token file too small: %zu tokens, need >%d\n", n_tokens, SEQ + 1);
+            munmap(token_data, data_len);
+            close(data_fd);
             return 1;
         }
         printf("Token data: %zu tokens (%.1f MB)\n", n_tokens, data_len/1e6);

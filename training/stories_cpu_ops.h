@@ -123,6 +123,7 @@ static void embed_lookup(float *x, const float *embed, const uint16_t *tokens, i
 static void embed_backward(float *d_embed, const float *dx, const uint16_t *tokens, int dim, int seq) {
     for (int t = 0; t < seq; t++) {
         int tok = tokens[t];
+        if (tok >= VOCAB) { tok = 0; }  // HIGH-01: clamp invalid token -> position 0
         for (int d = 0; d < dim; d++) {
             d_embed[tok*dim + d] += dx[d*seq + t];
         }
