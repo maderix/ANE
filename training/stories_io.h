@@ -161,7 +161,11 @@ static void free_kern(Kern *k) {
     CFRelease(k->model); CFRelease(k->request); CFRelease(k->tmpDir);
     free(k);
 }
-static void ane_eval(Kern *k) {
+static bool ane_eval(Kern *k) {  // HIGH-05: was void
     id mdl = (__bridge id)k->model; id req = (__bridge id)k->request; NSError *e = nil;
-    ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(mdl, @selector(evaluateWithQoS:options:request:error:), 21, @{}, req, &e);
+    BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(
+        mdl, @selector(evaluateWithQoS:options:request:error:), 21, @{}, req, &e);
+    if (!ok) fprintf(stderr, "  [ane_eval] FAILED: %s\n",
+                     e ? [[e description] UTF8String] : "unknown error");
+    return (bool)ok;
 }

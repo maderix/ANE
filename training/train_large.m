@@ -408,6 +408,7 @@ int main(int argc, char *argv[]) {
             uint64_t tt = mach_absolute_time();
             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
 
+            bool step_ok = true;  // HIGH-05: track ANE eval success across all acc steps
             for (int a=0; a<ACCUM_STEPS && step<total_steps; a++, step++) {
                 uint64_t t0,t1;
                 // Sample random position in token data
@@ -433,7 +434,7 @@ int main(int argc, char *argv[]) {
                     t1=mach_absolute_time(); t_cblas_wait+=tb_ms(t1-t0); t0=t1;
                     io_write_fp16(kern[L].fwdAttn->ioIn, x_cur, DIM, SEQ);
                     t1=mach_absolute_time(); t_io+=tb_ms(t1-t0); t0=t1;
-                    ane_eval(kern[L].fwdAttn);
+                    step_ok &= ane_eval(kern[L].fwdAttn);
                     t1=mach_absolute_time(); t_ane+=tb_ms(t1-t0); t0=t1;
                     io_read_fp16(kern[L].fwdAttn->ioOut, ac->o_out,    0,     DIM, SEQ);
                     io_read_fp16(kern[L].fwdAttn->ioOut, ac->attn_out, 4*DIM, DIM, SEQ);
@@ -446,7 +447,7 @@ int main(int argc, char *argv[]) {
                     // FFN forward
                     io_write_fp16(kern[L].fwdFFN->ioIn, ac->x2, DIM, SEQ);
                     t1=mach_absolute_time(); t_io+=tb_ms(t1-t0); t0=t1;
-                    ane_eval(kern[L].fwdFFN);
+                    step_ok &= ane_eval(kern[L].fwdFFN);
                     t1=mach_absolute_time(); t_ane+=tb_ms(t1-t0); t0=t1;
                     io_read_fp16(kern[L].fwdFFN->ioOut, ac->ffn_out,  0,              DIM,    SEQ);
                     io_read_fp16(kern[L].fwdFFN->ioOut, ac->h1,       DIM,            HIDDEN, SEQ);
@@ -509,7 +510,7 @@ int main(int argc, char *argv[]) {
                     // FFN backward (ANE)
                     io_write_fp16_at(kern[L].ffnBwd->ioIn, 0, dffn, DIM, SEQ);
                     io_copy(kern[L].ffnBwd->ioIn, DIM, kern[L].fwdFFN->ioOut, DIM, 2*HIDDEN, SEQ);
-                    ane_eval(kern[L].ffnBwd);
+                    step_ok &= ane_eval(kern[L].ffnBwd);
                     io_read_fp16(kern[L].ffnBwd->ioOut, dx_ffn, 0,           DIM,    SEQ);
                     io_read_fp16(kern[L].ffnBwd->ioOut, dh1,    DIM,         HIDDEN, SEQ);
                     io_read_fp16(kern[L].ffnBwd->ioOut, dh3,    DIM+HIDDEN,  HIDDEN, SEQ);
@@ -549,10 +550,10 @@ int main(int argc, char *argv[]) {
                     // SDPA backward (ANE)
                     io_copy(kern[L].sdpaBwd1->ioIn, 0, kern[L].fwdAttn->ioOut, DIM, 3*DIM, SEQ);
                     io_write_fp16_at(kern[L].sdpaBwd1->ioIn, 3*DIM, dx2, DIM, SEQ);
-                    ane_eval(kern[L].sdpaBwd1);
+                    step_ok &= ane_eval(kern[L].sdpaBwd1);
                     io_copy(sdpaBwd2[L]->ioIn, 0, kern[L].sdpaBwd1->ioOut, DIM, 2*SCORE_CH, SEQ);
                     io_copy(sdpaBwd2[L]->ioIn, 2*SCORE_CH, kern[L].fwdAttn->ioOut, DIM, 2*DIM, SEQ);
-                    ane_eval(sdpaBwd2[L]);
+                    step_ok &= ane_eval(sdpaBwd2[L]);
 
                     io_read_fp16(sdpaBwd2[L]->ioOut, dq, 0,   DIM, SEQ);
                     io_read_fp16(sdpaBwd2[L]->ioOut, dk, DIM,  DIM, SEQ);
@@ -576,7 +577,7 @@ int main(int argc, char *argv[]) {
                     // QKV backward (ANE)
                     io_copy(kern[L].qkvBwd->ioIn, 0, sdpaBwd2[L]->ioOut, 0, 2*DIM, SEQ);
                     io_copy(kern[L].qkvBwd->ioIn, 2*DIM, kern[L].sdpaBwd1->ioOut, 0, DIM, SEQ);
-                    ane_eval(kern[L].qkvBwd);
+                    step_ok &= ane_eval(kern[L].qkvBwd);
                     io_read_fp16(kern[L].qkvBwd->ioOut, dx_attn, 0, DIM, SEQ);
 
                     // RMSNorm1 backward (using saved layer input)
@@ -631,6 +632,10 @@ int main(int argc, char *argv[]) {
                     "\"t_elem\":%.3f,\"t_rms\":%.3f,\"t_cblas_wait\":%.3f,"
                     "\"compiles\":%d}\n",
                     step, loss, step_ane, step_io, step_cls, step_elem, step_rms, step_cbw, g_compile_count);
+            }
+            if (!step_ok) {  // HIGH-05: skip gradient update if any ANE eval failed
+                fprintf(stderr, "  Step %d: ANE eval error — gradient update skipped\n", step);
+                continue;  // skip to next iteration of outer while (step < total_steps)
             }
             double tms = tb_ms(mach_absolute_time() - tt);
             total_train_ms += tms;
