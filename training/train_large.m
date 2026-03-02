@@ -361,9 +361,14 @@ int main(int argc, char *argv[]) {
                     total_compile_ms+cum_compile, total_train_ms+cum_train, wall+cum_wall,
                     total_steps_done+cum_steps, total_batches+cum_batches, adam_t,
                     lw, la, rms_final, &arms_final, embed, &aembed);
-                printf("[exec() restart step %d, %d compiles, loss=%.4f]\n", step, g_compile_count, last_loss);
+                char rp_exec[PATH_MAX];
+                if (!realpath(argv[0], rp_exec)) { perror("cannot resolve argv[0]"); return 1; }
+                printf("[exec() restart step %d, %d compiles, loss=%.4f -> %s]\n",
+                       step, g_compile_count, last_loss, rp_exec);
                 fflush(stdout);
-                execl(argv[0], argv[0], "--resume", NULL);
+                munmap(token_data, data_len);  // HIGH-03: release mmap before exec
+                close(data_fd);               // HIGH-03: release FD before exec
+                execl(rp_exec, rp_exec, "--resume", NULL);
                 perror("execl"); return 1;
             }
 
