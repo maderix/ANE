@@ -1,0 +1,23 @@
+# macOS Metadaten
+.DS_Store
+._*
+
+# Debug- und Log-Dateien (ref: docs/reports/security-audit-2026-03-02.md LOW-04)
+*.log
+
+# Kompilierte Binaries (Makefile-Outputs: make train, make train_large, make probes)
+training/train
+training/train_large
+training/test_weight_reload
+training/test_perf_stats
+training/test_qos_sweep
+training/test_ane_advanced
+
+# Grosse Trainingsdaten und Checkpoints (binary, nicht fuer Git geeignet)
+# Erzeugt durch: make tokenize / Trainingslaeufe
+training/*.bin
+training/*.mlmodelc/
+training/*.mlpackage/
+
+# Asset-Modelle und externe Ressourcen
+assets/
