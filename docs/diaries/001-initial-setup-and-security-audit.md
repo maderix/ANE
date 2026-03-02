@@ -85,6 +85,31 @@ Alle 6 MED-Findings behoben. Simulation: 2–3 Iterationsrunden, Gesamtbewertung
 | Finding-Typ | Anzahl | Status |
 |-------------|--------|--------|
 | KRITISCH (CRIT-01–04) | 4 | ✅ BEHOBEN |
-| HOCH (HIGH-01–05) | 5 | Offen |
+| HOCH (HIGH-01–05) | 5 | HIGH-01 ✅ BEHOBEN, HIGH-02–05 Offen |
 | MITTEL (MED-01–06) | 6 | ✅ BEHOBEN |
 | NIEDRIG (LOW-01–04) | 4 | ✅ BEHOBEN |
+
+## HIGH-01 Fix (2026-03-02)
+
+Branch `fix/high-security-findings` erstellt. HIGH-01 behoben.
+
+### Problem
+Zwei zusammenhaengende Schwachstellen:
+1. `train_large.m`: `n_tokens = data_len / 2` ohne Mindestgroessen-Pruefung. Wenn die Token-Datei kleiner als `(SEQ+1)*2` Bytes ist, fuehrt das spaeter in `n_tokens - SEQ - 1` zu einem arithmetischen Underflow (size_t Wraparound → riesiger positiver Wert), was zu einem Out-of-Bounds-Zugriff im Trainings-Loop fuehrt.
+2. `stories_cpu_ops.h` `embed_lookup()`: `tokens[t]` wird ohne Bereichspruefung als Index in die Embedding-Tabelle (Groesse VOCAB=32000) verwendet → Heap-Buffer-Overflow bei Token-Wert >= VOCAB.
+
+### Aenderungen
+
+| Datei | Zeile | Aenderung |
+|-------|-------|-----------|
+| `training/train_large.m` | 299–302 | Early-exit Guard: `if (n_tokens < (size_t)SEQ + 1)` → `fprintf(stderr, ...)` + `return 1` |
+| `training/stories_cpu_ops.h` | 115 | Bounds-Clamp in `embed_lookup()`: `if (tok >= VOCAB) { tok = 0; }` |
+
+### Design-Entscheidungen
+- **Clamp statt Abort in embed_lookup**: Der Fix verwendet `tok = 0` (Position 0) statt Programmabbruch, weil `embed_lookup()` ein heisser Pfad im Trainings-Loop ist. Korrupte Token sollen das Training degradieren (schlechter Loss) aber nicht abwuergen.
+- **Early exit in train_large.m**: Hier ist ein harter Abbruch korrekt — eine zu kleine Token-Datei ist ein Konfigurationsfehler, kein transienter Datenfehler.
+- **embed_backward nicht gepatcht**: Die `embed_backward()`-Funktion hat dieselbe Schwachstelle (schreibender OOB-Zugriff). Laut Aufgabenstellung wird nur `embed_lookup()` adressiert. Die `embed_backward()`-Schwachstelle ist in weiteren HIGH-Findings zu behandeln.
+
+### Build-Verifikation
+- `make train_large` kompiliert ohne Fehler oder neue Warnungen.
+- Commit: `236e495` auf Branch `fix/high-security-findings`
