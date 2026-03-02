@@ -4,25 +4,21 @@
 #include "forward.h"
 #include <math.h>
 #include <string.h>
+#include <Accelerate/Accelerate.h>
 
-// dW += dy @ x^T — dy: [S, out_dim], x: [S, in_dim], dW: [out_dim, in_dim]
+// dW += dy^T @ x — dy: [S, out_dim], x: [S, in_dim], dW: [out_dim, in_dim]
 static void cpu_accum_dW(float *dW, const float *dy, const float *x, int S, int out_dim, int in_dim) {
-    for (int t = 0; t < S; t++)
-        for (int i = 0; i < out_dim; i++)
-            for (int j = 0; j < in_dim; j++)
-                dW[i*in_dim+j] += dy[t*out_dim+i] * x[t*in_dim+j];
+    cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+                out_dim, in_dim, S, 1.0f,
+                dy, out_dim, x, in_dim, 1.0f, dW, in_dim);
 }
 
 // dx = W^T @ dy — W: [out_dim, in_dim], dy: [S, out_dim] → dx: [S, in_dim]
 static void cpu_matmul_backward_dx(const float *W, const float *dy, float *dx,
                                     int S, int out_dim, int in_dim) {
-    for (int t = 0; t < S; t++)
-        for (int j = 0; j < in_dim; j++) {
-            float sum = 0;
-            for (int i = 0; i < out_dim; i++)
-                sum += W[i*in_dim+j] * dy[t*out_dim+i];
-            dx[t*in_dim+j] = sum;
-        }
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                S, in_dim, out_dim, 1.0f,
+                dy, out_dim, W, in_dim, 0.0f, dx, in_dim);
 }
 
 static void cpu_rmsnorm_backward(float *dx, const float *dy, const float *x, const float *w,
@@ -278,18 +274,30 @@ static void model_adam_step(Model *m, float lr, float beta1, float beta2, float 
     m->adam_step++;
     float bc1 = 1.0f - powf(beta1, m->adam_step);
     float bc2 = 1.0f - powf(beta2, m->adam_step);
+    float neg_lr_over_bc1 = -lr / bc1;
+    float inv_bc2 = 1.0f / bc2;
+    float one_minus_b1 = 1.0f - beta1;
+    float one_minus_b2 = 1.0f - beta2;
     size_t idx = 0;
 
+    // Vectorized Adam update for a contiguous chunk
     #define ADAM_UPDATE(param, grad, size) do { \
-        for (size_t _i = 0; _i < (size_t)(size); _i++) { \
-            float g = (grad)[_i]; \
-            m->adam_m[idx] = beta1 * m->adam_m[idx] + (1-beta1) * g; \
-            m->adam_v[idx] = beta2 * m->adam_v[idx] + (1-beta2) * g * g; \
-            float m_hat = m->adam_m[idx] / bc1; \
-            float v_hat = m->adam_v[idx] / bc2; \
-            (param)[_i] -= lr * m_hat / (sqrtf(v_hat) + eps); \
-            idx++; \
-        } \
+        size_t _n = (size_t)(size); \
+        float *_m = m->adam_m + idx; \
+        float *_v = m->adam_v + idx; \
+        float *_tmp = (float*)malloc(_n * sizeof(float)); \
+        vDSP_vsmul(_m, 1, &beta1, _m, 1, _n); \
+        vDSP_vsma((grad), 1, &one_minus_b1, _m, 1, _m, 1, _n); \
+        vDSP_vsq((grad), 1, _tmp, 1, _n); \
+        vDSP_vsmul(_v, 1, &beta2, _v, 1, _n); \
+        vDSP_vsma(_tmp, 1, &one_minus_b2, _v, 1, _v, 1, _n); \
+        vDSP_vsmul(_v, 1, &inv_bc2, _tmp, 1, _n); \
+        int _nn = (int)_n; vvsqrtf(_tmp, _tmp, &_nn); \
+        vDSP_vsadd(_tmp, 1, &eps, _tmp, 1, _n); \
+        vDSP_vdiv(_tmp, 1, _m, 1, _tmp, 1, _n); \
+        vDSP_vsma(_tmp, 1, &neg_lr_over_bc1, (param), 1, (param), 1, _n); \
+        free(_tmp); \
+        idx += _n; \
     } while(0)
 
     int d = m->cfg.dim, hd = m->cfg.hidden_dim, vs = m->cfg.vocab_size;
