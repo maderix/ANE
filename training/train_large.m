@@ -581,6 +581,16 @@ int main(int argc, char *argv[]) {
                 steps_batch++;
                 if (step % 10 == 0 || step == start_step)
                     printf("step %-4d loss=%.4f\n", step, loss);
+
+                // JSON telemetry to stderr
+                double step_ane = t_ane/steps_batch, step_io = t_io/steps_batch;
+                double step_cls = t_cls/steps_batch, step_elem = t_elem/steps_batch;
+                double step_rms = t_rms/steps_batch, step_cbw = t_cblas_wait/steps_batch;
+                fprintf(stderr, "{\"type\":\"step\",\"step\":%d,\"loss\":%.6f,"
+                    "\"t_ane\":%.3f,\"t_io\":%.3f,\"t_cls\":%.3f,"
+                    "\"t_elem\":%.3f,\"t_rms\":%.3f,\"t_cblas_wait\":%.3f,"
+                    "\"compiles\":%d}\n",
+                    step, loss, step_ane, step_io, step_cls, step_elem, step_rms, step_cbw, g_compile_count);
             }
             double tms = tb_ms(mach_absolute_time() - tt);
             total_train_ms += tms;
@@ -622,6 +632,19 @@ int main(int argc, char *argv[]) {
             printf("    ane=%.1f io=%.1f cls=%.1f elem=%.1f rms=%.1f cblas_wait=%.1f ms/step\n",
                    t_ane/steps_batch, t_io/steps_batch, t_cls/steps_batch, t_elem/steps_batch,
                    t_rms/steps_batch, t_cblas_wait/steps_batch);
+
+            // JSON batch telemetry to stderr
+            {
+                double bf = NLAYERS * (4.0*2*DIM*DIM*SEQ + 2.0*2*DIM*HIDDEN*SEQ + 2.0*HIDDEN*DIM*SEQ);
+                double bs = NLAYERS * 2.0*HEADS*5*SEQ*SEQ*HD;
+                double ane_f_batch = (bf*2 + bs) * steps_batch;
+                double ane_tflops = ane_f_batch / (tms * 1e9);
+                fprintf(stderr, "{\"type\":\"batch\",\"batch\":%d,\"compile_ms\":%.1f,"
+                    "\"train_ms\":%.1f,\"ms_per_step\":%.1f}\n",
+                    steps_batch, cms, tms, tms/steps_batch);
+                fprintf(stderr, "{\"type\":\"perf\",\"ane_tflops\":%.3f,\"ane_util_pct\":%.2f}\n",
+                    ane_tflops, 100.0*ane_tflops/15.8);
+            }
         }
 
         // Efficiency report
