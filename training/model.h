@@ -78,7 +78,10 @@ typedef struct {
 static int model_load_weights(Model *m, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) { fprintf(stderr, "Cannot open %s\n", path); return -1; }
-    fread(&m->cfg, sizeof(Config), 1, f);
+    if (fread(&m->cfg, sizeof(Config), 1, f) != 1) {
+        fprintf(stderr, "ERROR: failed to read config from %s\n", path);
+        fclose(f); return -1;
+    }
     bool shared = m->cfg.vocab_size > 0;
     if (m->cfg.vocab_size < 0) m->cfg.vocab_size = -m->cfg.vocab_size;
 
@@ -89,7 +92,10 @@ static int model_load_weights(Model *m, const char *path) {
     int d = m->cfg.dim, hd = m->cfg.hidden_dim, nl = m->cfg.n_layers, vs = m->cfg.vocab_size;
 
     m->token_embedding = (float*)malloc(vs * d * sizeof(float));
-    fread(m->token_embedding, sizeof(float), vs * d, f);
+    if (fread(m->token_embedding, sizeof(float), vs * d, f) != (size_t)(vs * d)) {
+        fprintf(stderr, "ERROR: short read on token_embedding (file truncated?)\n");
+        fclose(f); return -1;
+    }
 
     float *rms_att_all = (float*)malloc(nl * d * sizeof(float));
     float *wq_all = (float*)malloc(nl * d * d * sizeof(float));
@@ -101,15 +107,24 @@ static int model_load_weights(Model *m, const char *path) {
     float *w2_all = (float*)malloc(nl * d * hd * sizeof(float));
     float *w3_all = (float*)malloc(nl * hd * d * sizeof(float));
 
-    fread(rms_att_all, sizeof(float), nl * d, f);
-    fread(wq_all, sizeof(float), nl * d * d, f);
-    fread(wk_all, sizeof(float), nl * d * d, f);
-    fread(wv_all, sizeof(float), nl * d * d, f);
-    fread(wo_all, sizeof(float), nl * d * d, f);
-    fread(rms_ffn_all, sizeof(float), nl * d, f);
-    fread(w1_all, sizeof(float), nl * hd * d, f);
-    fread(w2_all, sizeof(float), nl * d * hd, f);
-    fread(w3_all, sizeof(float), nl * hd * d, f);
+    #define FREAD_CHECK(buf, count, file, label) do { \
+        size_t _n = fread(buf, sizeof(float), count, file); \
+        if (_n != (size_t)(count)) { \
+            fprintf(stderr, "ERROR: short read on %s: got %zu, expected %zu (file truncated?)\n", \
+                    label, _n, (size_t)(count)); \
+            fclose(file); return -1; \
+        } \
+    } while(0)
+
+    FREAD_CHECK(rms_att_all, nl * d, f, "rms_att");
+    FREAD_CHECK(wq_all, nl * d * d, f, "wq");
+    FREAD_CHECK(wk_all, nl * d * d, f, "wk");
+    FREAD_CHECK(wv_all, nl * d * d, f, "wv");
+    FREAD_CHECK(wo_all, nl * d * d, f, "wo");
+    FREAD_CHECK(rms_ffn_all, nl * d, f, "rms_ffn");
+    FREAD_CHECK(w1_all, nl * hd * d, f, "w1");
+    FREAD_CHECK(w2_all, nl * d * hd, f, "w2");
+    FREAD_CHECK(w3_all, nl * hd * d, f, "w3");
 
     for (int l = 0; l < nl; l++) {
         m->rms_att_w[l] = (float*)malloc(d * sizeof(float));
@@ -135,14 +150,15 @@ static int model_load_weights(Model *m, const char *path) {
     free(rms_ffn_all); free(w1_all); free(w2_all); free(w3_all);
 
     m->rms_final_w = (float*)malloc(d * sizeof(float));
-    fread(m->rms_final_w, sizeof(float), d, f);
+    FREAD_CHECK(m->rms_final_w, d, f, "rms_final");
 
     if (shared) {
         m->wcls = m->token_embedding;
     } else {
         m->wcls = (float*)malloc(vs * d * sizeof(float));
-        fread(m->wcls, sizeof(float), vs * d, f);
+        FREAD_CHECK(m->wcls, vs * d, f, "wcls");
     }
+    #undef FREAD_CHECK
     fclose(f);
     return 0;
 }
@@ -188,32 +204,45 @@ static int model_compile_kernels(Model *m, int seq_len) {
     return 0;
 }
 
-// Recompile all kernels after weight update — unload all first to avoid ANE model limit
+// Recompile all kernels after weight update — compile new first, then swap
 static int model_recompile_kernels(Model *m) {
     int d = m->cfg.dim, hd = m->cfg.hidden_dim, vs = m->cfg.vocab_size;
     int S = m->seq_len;
-    // Phase 1: unload+free all
+
+    // Phase 1: compile new kernels into temporaries
+    ANEKernel *new_q[N_LAYERS], *new_k[N_LAYERS], *new_v[N_LAYERS], *new_o[N_LAYERS];
+    ANEKernel *new_w1[N_LAYERS], *new_w2[N_LAYERS], *new_w3[N_LAYERS];
+    for (int l = 0; l < N_LAYERS; l++) {
+        new_q[l] = compile_conv_kernel(m->wq[l], d, d, S);
+        new_k[l] = compile_conv_kernel(m->wk[l], d, d, S);
+        new_v[l] = compile_conv_kernel(m->wv[l], d, d, S);
+        new_o[l] = compile_conv_kernel(m->wo[l], d, d, S);
+        new_w1[l] = compile_conv_kernel(m->w1[l], d, hd, S);
+        new_w2[l] = compile_conv_kernel(m->w2[l], hd, d, S);
+        new_w3[l] = compile_conv_kernel(m->w3[l], d, hd, S);
+        if (!new_q[l] || !new_k[l] || !new_v[l] || !new_o[l] ||
+            !new_w1[l] || !new_w2[l] || !new_w3[l]) {
+            // Cleanup partially compiled new kernels
+            for (int i = 0; i <= l; i++) {
+                ane_free(new_q[i]); ane_free(new_k[i]); ane_free(new_v[i]); ane_free(new_o[i]);
+                ane_free(new_w1[i]); ane_free(new_w2[i]); ane_free(new_w3[i]);
+            }
+            fprintf(stderr, "Recompile failed at layer %d, keeping old kernels\n", l);
+            return -1;
+        }
+    }
+    ANEKernel *new_cls = compile_conv_kernel(m->wcls, d, vs, S);
+
+    // Phase 2: all compiles succeeded — swap and free old
     for (int l = 0; l < N_LAYERS; l++) {
         ane_free(m->kern_q[l]); ane_free(m->kern_k[l]); ane_free(m->kern_v[l]); ane_free(m->kern_o[l]);
         ane_free(m->kern_w1[l]); ane_free(m->kern_w2[l]); ane_free(m->kern_w3[l]);
-        m->kern_q[l]=m->kern_k[l]=m->kern_v[l]=m->kern_o[l]=NULL;
-        m->kern_w1[l]=m->kern_w2[l]=m->kern_w3[l]=NULL;
+        m->kern_q[l] = new_q[l]; m->kern_k[l] = new_k[l];
+        m->kern_v[l] = new_v[l]; m->kern_o[l] = new_o[l];
+        m->kern_w1[l] = new_w1[l]; m->kern_w2[l] = new_w2[l]; m->kern_w3[l] = new_w3[l];
     }
-    if (m->kern_cls) { ane_free(m->kern_cls); m->kern_cls=NULL; }
-    // Phase 2: recompile all
-    for (int l = 0; l < N_LAYERS; l++) {
-        m->kern_q[l] = compile_conv_kernel(m->wq[l], d, d, S);
-        m->kern_k[l] = compile_conv_kernel(m->wk[l], d, d, S);
-        m->kern_v[l] = compile_conv_kernel(m->wv[l], d, d, S);
-        m->kern_o[l] = compile_conv_kernel(m->wo[l], d, d, S);
-        m->kern_w1[l] = compile_conv_kernel(m->w1[l], d, hd, S);
-        m->kern_w2[l] = compile_conv_kernel(m->w2[l], hd, d, S);
-        m->kern_w3[l] = compile_conv_kernel(m->w3[l], d, hd, S);
-        if (!m->kern_q[l] || !m->kern_k[l] || !m->kern_v[l] || !m->kern_o[l] ||
-            !m->kern_w1[l] || !m->kern_w2[l] || !m->kern_w3[l]) return -1;
-    }
-    m->kern_cls = compile_conv_kernel(m->wcls, d, vs, S);
-    // cls may fail for large vocab — that's OK, forward uses CPU fallback
+    if (m->kern_cls) ane_free(m->kern_cls);
+    m->kern_cls = new_cls;  // may be NULL for large vocab — forward uses CPU fallback
     return 0;
 }
 

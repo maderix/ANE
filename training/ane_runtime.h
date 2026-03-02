@@ -141,9 +141,14 @@ static void ane_read_output(ANEKernel *k, int idx, void *data, size_t bytes) {
 
 static bool ane_eval(ANEKernel *k) {
     NSError *e = nil;
-    return ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(
+    BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(
         k->model, @selector(evaluateWithQoS:options:request:error:),
         21, @{}, k->request, &e);
+    if (!ok) {
+        fprintf(stderr, "ANE eval failed: %s\n",
+                e ? [[e description] UTF8String] : "unknown error");
+    }
+    return ok;
 }
 
 static void ane_free(ANEKernel *k) {

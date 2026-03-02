@@ -139,7 +139,7 @@ static void free_kern(Kern *k) {
     free(k);
 }
 
-static void ane_eval_k(Kern *k, const float *in, float *out, int in_ch, int out_ch, int sp) {
+static bool ane_eval_k(Kern *k, const float *in, float *out, int in_ch, int out_ch, int sp) {
     float *tmp = (float*)malloc(in_ch * sp * sizeof(float));
     for (int t = 0; t < sp; t++)
         for (int c = 0; c < in_ch; c++)
@@ -151,8 +151,13 @@ static void ane_eval_k(Kern *k, const float *in, float *out, int in_ch, int out_
     NSError *e = nil;
     id mdl = (__bridge id)k->model;
     id req = (__bridge id)k->request;
-    ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(
+    BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(
         mdl, @selector(evaluateWithQoS:options:request:error:), 21, @{}, req, &e);
+    if (!ok) {
+        fprintf(stderr, "ANE eval failed: %s\n",
+                e ? [[e description] UTF8String] : "unknown error");
+        return false;
+    }
     float *tmp2 = (float*)malloc(out_ch * sp * sizeof(float));
     IOSurfaceLock(k->ioOut, kIOSurfaceLockReadOnly, NULL);
     memcpy(tmp2, IOSurfaceGetBaseAddress(k->ioOut), out_ch * sp * sizeof(float));
@@ -161,6 +166,7 @@ static void ane_eval_k(Kern *k, const float *in, float *out, int in_ch, int out_
         for (int c = 0; c < out_ch; c++)
             out[t*out_ch + c] = tmp2[c*sp + t];
     free(tmp2);
+    return true;
 }
 
 // === Checkpoint: save/restore training state for exec() restart ===
@@ -179,21 +185,25 @@ static void save_checkpoint(const char *path, int step, float loss,
                             int D, int H, int S, int total_steps, float lr,
                             const float *W1, const float *W2,
                             double cc, double ct, double cw, int cs, int cb) {
-    FILE *f = fopen(path, "wb");
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    FILE *f = fopen(tmp_path, "wb");
+    if (!f) { fprintf(stderr, "Failed to open %s for checkpoint\n", tmp_path); return; }
     CkptHeader hdr = {step, loss, D, H, S, total_steps, lr, cc, ct, cw, cs, cb};
     fwrite(&hdr, sizeof(hdr), 1, f);
     fwrite(W1, sizeof(float), H * D, f);
     fwrite(W2, sizeof(float), D * H, f);
     fclose(f);
+    rename(tmp_path, path);  // atomic on POSIX
 }
 
 static bool load_checkpoint(const char *path, CkptHeader *hdr,
                             float *W1, float *W2, int H, int D) {
     FILE *f = fopen(path, "rb");
     if (!f) return false;
-    fread(hdr, sizeof(CkptHeader), 1, f);
-    fread(W1, sizeof(float), H * D, f);
-    fread(W2, sizeof(float), D * H, f);
+    if (fread(hdr, sizeof(CkptHeader), 1, f) != 1) { fclose(f); return false; }
+    if (fread(W1, sizeof(float), H * D, f) != (size_t)(H * D)) { fclose(f); return false; }
+    if (fread(W2, sizeof(float), D * H, f) != (size_t)(D * H)) { fclose(f); return false; }
     fclose(f);
     return true;
 }

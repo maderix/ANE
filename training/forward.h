@@ -7,7 +7,7 @@
 // ANE conv eval: input [S, in_dim] row-major → transpose to [in_dim, S] channels-first
 // ANE computes conv(W, x) with baked W → output [out_dim, S]
 // Transpose back to [S, out_dim] row-major
-static void ane_conv_eval(ANEKernel *kernel, const float *x, float *y,
+static bool ane_conv_eval(ANEKernel *kernel, const float *x, float *y,
                           int S, int in_dim, int out_dim) {
     float *x_t = (float*)malloc(S * in_dim * sizeof(float));
     for (int t = 0; t < S; t++)
@@ -15,7 +15,11 @@ static void ane_conv_eval(ANEKernel *kernel, const float *x, float *y,
             x_t[i*S + t] = x[t*in_dim + i];
 
     ane_write_input(kernel, 0, x_t, S * in_dim * sizeof(float));
-    ane_eval(kernel);
+    bool ok = ane_eval(kernel);
+    if (!ok) {
+        free(x_t);
+        return false;
+    }
 
     float *y_t = (float*)malloc(S * out_dim * sizeof(float));
     ane_read_output(kernel, 0, y_t, S * out_dim * sizeof(float));
@@ -25,6 +29,7 @@ static void ane_conv_eval(ANEKernel *kernel, const float *x, float *y,
             y[t*out_dim + i] = y_t[i*S + t];
 
     free(x_t); free(y_t);
+    return true;
 }
 
 // CPU matmul fallback: y = W @ x, W[out_dim, in_dim], x[S, in_dim] → y[S, out_dim]
