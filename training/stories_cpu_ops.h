@@ -5,8 +5,8 @@
 static float *g_rms_tmp = NULL;
 
 static void rmsnorm(float *out, const float *x, const float *w, int d, int S) {
-    if (!g_rms_tmp) g_rms_tmp = (float*)malloc(S*4);
-    float *ss = (float*)calloc(S, sizeof(float));
+    if (!g_rms_tmp) g_rms_tmp = xmf(S);
+    float *ss = xcf(S);
     for (int i=0; i<d; i++) {
         vDSP_vmul(x+i*S, 1, x+i*S, 1, g_rms_tmp, 1, (vDSP_Length)S);
         vDSP_vadd(g_rms_tmp, 1, ss, 1, ss, 1, (vDSP_Length)S);
@@ -22,17 +22,17 @@ static void rmsnorm(float *out, const float *x, const float *w, int d, int S) {
 }
 
 static void rmsnorm_bwd(float *dx, float *dw, const float *dy, const float *x, const float *w, int d, int S) {
-    if (!g_rms_tmp) g_rms_tmp = (float*)malloc(S*4);
-    float *ss = (float*)calloc(S, sizeof(float));
+    if (!g_rms_tmp) g_rms_tmp = xmf(S);
+    float *ss = xcf(S);
     for (int i=0; i<d; i++) {
         vDSP_vmul(x+i*S, 1, x+i*S, 1, g_rms_tmp, 1, (vDSP_Length)S);
         vDSP_vadd(g_rms_tmp, 1, ss, 1, ss, 1, (vDSP_Length)S);
     }
     float invd = 1.0f/d, eps=1e-5f;
     vDSP_vsmsa(ss, 1, &invd, &eps, ss, 1, (vDSP_Length)S);
-    float *rrms = (float*)malloc(S*4);
+    float *rrms = xmf(S);
     int n = S; vvrsqrtf(rrms, ss, &n);
-    float *dot = (float*)calloc(S, sizeof(float));
+    float *dot = xcf(S);
     for (int i=0; i<d; i++) {
         vDSP_vmul(dy+i*S, 1, x+i*S, 1, g_rms_tmp, 1, (vDSP_Length)S);
         vDSP_vsma(g_rms_tmp, 1, &w[i], dot, 1, dot, 1, (vDSP_Length)S);
@@ -71,7 +71,7 @@ static void adam_update(float *w, const float *g, AdamState *s, int t, float lr,
 // For vDSP: transpose to row-major scratch [S, V] to vectorize softmax per position
 static float cross_entropy_loss(float *dlogits, const float *logits, const uint16_t *targets, int V, int S) {
     // Work in transposed layout [S, V] where each row is one position's logits (contiguous)
-    float *buf = (float*)malloc(S * V * 4);
+    float *buf = xmf((size_t)S * V);
     // Transpose [V,S] → [S,V]: buf[t*V+v] = logits[v*S+t]
     vDSP_mtrans(logits, 1, buf, 1, (vDSP_Length)S, (vDSP_Length)V);
 
