@@ -1,8 +1,9 @@
 // main.m -- Qwen2.5-0.5B inference on Apple Neural Engine
-// Supports three modes:
+// Supports four modes:
 //   1. Single-shot:  ./qwen_ane weights.bin "token_ids" [max_tokens]
 //   2. Stdin server:  ./qwen_ane weights.bin --server
 //   3. Socket server: ./qwen_ane weights.bin --server /tmp/qwen_ane.sock
+//   4. HTTP API:      ./qwen_ane weights.bin --http 8000 --model-dir ~/models/Qwen2.5-0.5B-Instruct
 //
 // Build:
 //   xcrun clang -O2 -framework Foundation -framework IOSurface \
@@ -19,10 +20,14 @@
 #include <unistd.h>
 #include <signal.h>
 #include "qwen_ane_infer.h"
+#include "tokenizer.h"
+#include "http_server.h"
 
 int g_fp16_io = 0;
 static QwenModel g_model;
 static const char *g_sock_path = NULL;
+static Tokenizer g_tokenizer;
+static int g_tokenizer_loaded = 0;
 
 static void cleanup_socket(void) {
     if (g_sock_path) unlink(g_sock_path);
@@ -280,15 +285,123 @@ static void run_socket_server(const char *sock_path) {
     }
 }
 
+// --- HTTP API handler ---
+static void http_api_handler(int client_fd, HttpRequest *req, void *ctx) {
+    (void)ctx;
+
+    if (strcmp(req->method, "GET") == 0 && strcmp(req->path, "/health") == 0) {
+        http_send_json(client_fd, 200, "{\"status\":\"ok\",\"mode\":\"http\"}");
+        return;
+    }
+
+    if (strcmp(req->method, "POST") != 0 || strcmp(req->path, "/v1/completions") != 0) {
+        http_send_json(client_fd, 404, "{\"error\":\"not found, use POST /v1/completions\"}");
+        return;
+    }
+
+    if (req->body_len == 0) {
+        http_send_json(client_fd, 400, "{\"error\":\"empty body\"}");
+        return;
+    }
+
+    char prompt[32768];
+    if (http_json_get_string(req->body, "prompt", prompt, sizeof(prompt)) < 0) {
+        http_send_json(client_fd, 400, "{\"error\":\"missing 'prompt' field\"}");
+        return;
+    }
+
+    int max_tokens = http_json_get_int(req->body, "max_tokens", 50);
+    if (max_tokens > 512) max_tokens = 512;
+    if (max_tokens < 1) max_tokens = 1;
+
+    char system_prompt[4096];
+    if (http_json_get_string(req->body, "system", system_prompt, sizeof(system_prompt)) < 0)
+        strcpy(system_prompt, "You are a helpful assistant. Be concise.");
+
+    // Time tokenization separately
+    struct timespec t_tok0, t_tok1, t_gen0, t_gen1, t_det0, t_det1;
+
+    clock_gettime(CLOCK_MONOTONIC, &t_tok0);
+    int input_ids[4096];
+    int n_input = tok_encode_chat(&g_tokenizer, system_prompt, prompt, input_ids, 4096);
+    clock_gettime(CLOCK_MONOTONIC, &t_tok1);
+    double tokenize_ms = timespec_diff(&t_tok0, &t_tok1) * 1000.0;
+
+    if (n_input == 0) {
+        http_send_json(client_fd, 400, "{\"error\":\"tokenization produced no tokens\"}");
+        return;
+    }
+
+    // Pure inference timing
+    clock_gettime(CLOCK_MONOTONIC, &t_gen0);
+    int out_ids[4096];
+    double p_tps, d_tps;
+    int n_out = generate(input_ids, n_input, max_tokens, out_ids, 4096, &p_tps, &d_tps);
+    clock_gettime(CLOCK_MONOTONIC, &t_gen1);
+    double inference_ms = timespec_diff(&t_gen0, &t_gen1) * 1000.0;
+
+    // Prefill time = inference of prompt tokens only (from generate's internal timing)
+    double prefill_s = p_tps > 0 ? n_input / p_tps : 0;
+    double ttft_ms = prefill_s * 1000.0;
+
+    // Time detokenization separately
+    clock_gettime(CLOCK_MONOTONIC, &t_det0);
+    char decoded[65536];
+    tok_decode(&g_tokenizer, out_ids, n_out, decoded, sizeof(decoded));
+    clock_gettime(CLOCK_MONOTONIC, &t_det1);
+    double detokenize_ms = timespec_diff(&t_det0, &t_det1) * 1000.0;
+
+    double total_ms = tokenize_ms + inference_ms + detokenize_ms;
+
+    // Escape the decoded text for JSON
+    char escaped[131072];
+    int ei = 0;
+    for (int i = 0; decoded[i] && ei < (int)sizeof(escaped) - 6; i++) {
+        switch (decoded[i]) {
+            case '"':  escaped[ei++] = '\\'; escaped[ei++] = '"'; break;
+            case '\\': escaped[ei++] = '\\'; escaped[ei++] = '\\'; break;
+            case '\n': escaped[ei++] = '\\'; escaped[ei++] = 'n'; break;
+            case '\r': escaped[ei++] = '\\'; escaped[ei++] = 'r'; break;
+            case '\t': escaped[ei++] = '\\'; escaped[ei++] = 't'; break;
+            default:
+                if ((unsigned char)decoded[i] < 0x20) {
+                    ei += snprintf(escaped + ei, 7, "\\u%04x", (unsigned char)decoded[i]);
+                } else {
+                    escaped[ei++] = decoded[i];
+                }
+        }
+    }
+    escaped[ei] = '\0';
+
+    // Build JSON response with detailed timing breakdown
+    char resp[HTTP_MAX_RESPONSE];
+    snprintf(resp, sizeof(resp),
+        "{\"text\":\"%s\",\"prompt_tokens\":%d,\"gen_tokens\":%d,"
+        "\"prefill_tps\":%.1f,\"decode_tps\":%.1f,"
+        "\"tokenize_ms\":%.1f,\"inference_ms\":%.1f,\"detokenize_ms\":%.1f,"
+        "\"ttft_ms\":%.1f,\"total_ms\":%.1f}",
+        escaped, n_input, n_out, p_tps, d_tps,
+        tokenize_ms, inference_ms, detokenize_ms, ttft_ms, total_ms);
+
+    http_send_json(client_fd, 200, resp);
+
+    printf("[http] prompt=%d gen=%d prefill=%.1f decode=%.1f t/s | tok=%.1f inf=%.1f detok=%.1f ms\n",
+           n_input, n_out, p_tps, d_tps, tokenize_ms, inference_ms, detokenize_ms);
+    fflush(stdout);
+
+    qwen_reset(&g_model);
+}
+
 int main(int argc, char **argv) {
     @autoreleasepool {
         if (argc < 2) {
             fprintf(stderr,
                 "Usage:\n"
-                "  %s <weights.bin> \"token_ids\" [max_tokens]   (single-shot)\n"
-                "  %s <weights.bin> --server                     (stdin loop)\n"
-                "  %s <weights.bin> --server /tmp/qwen_ane.sock  (socket server)\n",
-                argv[0], argv[0], argv[0]);
+                "  %s <weights.bin> \"token_ids\" [max_tokens]                  (single-shot)\n"
+                "  %s <weights.bin> --server                                    (stdin loop)\n"
+                "  %s <weights.bin> --server /tmp/qwen_ane.sock                 (socket server)\n"
+                "  %s <weights.bin> --http 8000 --model-dir ~/models/Qwen2.5   (HTTP API)\n",
+                argv[0], argv[0], argv[0], argv[0]);
             return 1;
         }
 
@@ -300,6 +413,7 @@ int main(int argc, char **argv) {
         if (load_weights(argv[1]) != 0) return 1;
 
         qwen_alloc(&g_model);
+        qwen_rope_init();
 
         printf("Compiling ANE kernels (169 total)...\n");
         struct timespec t0, t1;
@@ -309,15 +423,141 @@ int main(int argc, char **argv) {
         double compile_sec = timespec_diff(&t0, &t1);
         printf("Compile time: %.1fs\n\n", compile_sec);
 
-        // Check for --server flag
+        // Parse flags
         int server_mode = 0;
+        int http_port = 0;
+        int test_ane = 0;
         const char *sock_path = NULL;
+        const char *model_dir = NULL;
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--server") == 0) {
                 server_mode = 1;
                 if (i + 1 < argc && argv[i+1][0] != '-')
                     sock_path = argv[++i];
+            } else if (strcmp(argv[i], "--http") == 0) {
+                if (i + 1 < argc) http_port = atoi(argv[++i]);
+                else { fprintf(stderr, "--http requires a port number\n"); return 1; }
+            } else if (strcmp(argv[i], "--model-dir") == 0) {
+                if (i + 1 < argc) model_dir = argv[++i];
+                else { fprintf(stderr, "--model-dir requires a path\n"); return 1; }
+            } else if (strcmp(argv[i], "--test-ane") == 0) {
+                test_ane = 1;
             }
+        }
+
+        // ANE vs CPU correctness test
+        if (test_ane) {
+            printf("=== ANE vs CPU Projection Test ===\n\n");
+
+            // Use a realistic input: embed token 2610 ("What"), RMSNorm it
+            int test_token = 2610;
+            memcpy(g_model.x, g_model.embed + test_token * QWEN_DIM, QWEN_DIM * sizeof(float));
+            qwen_rmsnorm(g_model.xb, g_model.x, g_model.rms_att[0], QWEN_DIM);
+
+            // Also prepare a realistic Q output for the O projection test
+            cpu_project(g_model.wq[0], g_model.xb, g_model.q, QWEN_DIM, QWEN_Q_DIM);
+
+            float *cpu_out = (float*)calloc(QWEN_HIDDEN, sizeof(float));
+            float *ane_out = (float*)calloc(QWEN_HIDDEN, sizeof(float));
+
+            struct {
+                const char *name;
+                ANEKernel *kernel;
+                const float *weights;
+                int in_dim, out_dim;
+            } tests[] = {
+                {"L0 Q proj",   g_model.k_q[0],    g_model.wq[0],     QWEN_DIM, QWEN_Q_DIM},
+                {"L0 K proj",   g_model.k_k[0],    g_model.wk[0],     QWEN_DIM, QWEN_KV_DIM},
+                {"L0 V proj",   g_model.k_v[0],    g_model.wv[0],     QWEN_DIM, QWEN_KV_DIM},
+                {"L0 O proj",   g_model.k_o[0],    g_model.wo[0],     QWEN_Q_DIM, QWEN_DIM},
+                {"L0 Gate",     g_model.k_gate[0],  g_model.w_gate[0], QWEN_DIM, QWEN_HIDDEN},
+                {"L0 Up",       g_model.k_up[0],    g_model.w_up[0],   QWEN_DIM, QWEN_HIDDEN},
+                {"L0 Down",     g_model.k_down[0],  g_model.w_down[0], QWEN_HIDDEN, QWEN_DIM},
+                {"LM Head c0",  g_model.k_lmhead[0], g_model.embed,   QWEN_DIM, QWEN_LM_CHUNK_SIZE},
+            };
+            int n_tests = sizeof(tests) / sizeof(tests[0]);
+            int all_pass = 1;
+
+            for (int t = 0; t < n_tests; t++) {
+                if (!tests[t].kernel) {
+                    printf("  %-14s SKIP (kernel not compiled)\n", tests[t].name);
+                    continue;
+                }
+                const float *input;
+                if (tests[t].in_dim == QWEN_Q_DIM) {
+                    input = g_model.q;
+                } else if (tests[t].in_dim == QWEN_HIDDEN) {
+                    cpu_project(g_model.w_gate[0], g_model.xb, g_model.hb, QWEN_DIM, QWEN_HIDDEN);
+                    input = g_model.hb;
+                } else {
+                    input = g_model.xb;
+                }
+
+                cpu_project(tests[t].weights, input, cpu_out, tests[t].in_dim, tests[t].out_dim);
+
+                // ANE projection with return-value check
+                ane_write_input(tests[t].kernel, 0, input, tests[t].in_dim * sizeof(float));
+                bool ane_ok = ane_run(tests[t].kernel);
+                ane_read_output(tests[t].kernel, 0, ane_out, tests[t].out_dim * sizeof(float));
+                if (!ane_ok) printf("    !! ANE execution returned false\n");
+
+                float max_diff = 0, sum_diff = 0;
+                float cpu_norm = 0, ane_norm = 0;
+                for (int i = 0; i < tests[t].out_dim; i++) {
+                    float d = fabsf(cpu_out[i] - ane_out[i]);
+                    if (d > max_diff) max_diff = d;
+                    sum_diff += d;
+                    cpu_norm += cpu_out[i] * cpu_out[i];
+                    ane_norm += ane_out[i] * ane_out[i];
+                }
+                float avg_diff = sum_diff / tests[t].out_dim;
+                float rel_err = (sqrtf(cpu_norm) > 0) ?
+                    sqrtf(sum_diff * sum_diff / tests[t].out_dim) / sqrtf(cpu_norm / tests[t].out_dim) : 0;
+
+                int pass = (max_diff < 0.5f && rel_err < 0.05f);
+                if (!pass) all_pass = 0;
+
+                printf("  %-14s [%d→%d]  max_diff=%.6f  avg_diff=%.6f  rel_err=%.4f  %s\n",
+                       tests[t].name, tests[t].in_dim, tests[t].out_dim,
+                       max_diff, avg_diff, rel_err,
+                       pass ? "PASS" : "FAIL");
+                printf("    CPU first4: %.6f %.6f %.6f %.6f  norm=%.4f\n",
+                       cpu_out[0], cpu_out[1], cpu_out[2], cpu_out[3], sqrtf(cpu_norm));
+                printf("    ANE first4: %.6f %.6f %.6f %.6f  norm=%.4f\n",
+                       ane_out[0], ane_out[1], ane_out[2], ane_out[3], sqrtf(ane_norm));
+            }
+
+            printf("\n%s\n", all_pass ?
+                "ALL TESTS PASSED -- ANE projections match CPU (within FP16 tolerance)" :
+                "SOME TESTS FAILED -- ANE projections have accuracy issues");
+
+            // If all pass, benchmark one layer ANE vs CPU speed
+            if (all_pass) {
+                printf("\n=== Speed comparison (1000 iterations, L0 Q proj %d→%d) ===\n",
+                       QWEN_DIM, QWEN_Q_DIM);
+                struct timespec ts0, ts1;
+
+                clock_gettime(CLOCK_MONOTONIC, &ts0);
+                for (int i = 0; i < 1000; i++)
+                    cpu_project(g_model.wq[0], g_model.xb, cpu_out, QWEN_DIM, QWEN_Q_DIM);
+                clock_gettime(CLOCK_MONOTONIC, &ts1);
+                double cpu_us = timespec_diff(&ts0, &ts1) * 1e6 / 1000;
+
+                clock_gettime(CLOCK_MONOTONIC, &ts0);
+                for (int i = 0; i < 1000; i++)
+                    ane_project(g_model.k_q[0], g_model.xb, ane_out, QWEN_DIM, QWEN_Q_DIM);
+                clock_gettime(CLOCK_MONOTONIC, &ts1);
+                double ane_us = timespec_diff(&ts0, &ts1) * 1e6 / 1000;
+
+                printf("  CPU: %.1f us/call\n", cpu_us);
+                printf("  ANE: %.1f us/call\n", ane_us);
+                printf("  Ratio: %.2fx %s\n", cpu_us / ane_us,
+                       ane_us < cpu_us ? "(ANE faster)" : "(CPU faster)");
+            }
+
+            free(cpu_out);
+            free(ane_out);
+            return all_pass ? 0 : 1;
         }
 
         if (server_mode) {
@@ -325,6 +565,31 @@ int main(int argc, char **argv) {
                 run_socket_server(sock_path);
             else
                 run_stdin_server();
+            return 0;
+        }
+
+        // HTTP API mode
+        if (http_port > 0) {
+            if (!model_dir) {
+                // Default to ~/models/Qwen2.5-0.5B-Instruct
+                static char default_dir[4096];
+                const char *home = getenv("HOME");
+                snprintf(default_dir, sizeof(default_dir), "%s/models/Qwen2.5-0.5B-Instruct", home ? home : ".");
+                model_dir = default_dir;
+            }
+            printf("Loading tokenizer from %s...\n", model_dir);
+            if (tok_init(&g_tokenizer, model_dir) != 0) {
+                fprintf(stderr, "Failed to load tokenizer from %s\n", model_dir);
+                return 1;
+            }
+            g_tokenizer_loaded = 1;
+            printf("Tokenizer ready.\n\n");
+
+            signal(SIGINT, handle_signal);
+            signal(SIGTERM, handle_signal);
+
+            http_serve(http_port, http_api_handler, NULL);
+            tok_free(&g_tokenizer);
             return 0;
         }
 

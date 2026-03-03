@@ -22,8 +22,11 @@ training/train_double_buffer
 training/test_*
 !training/test_*.m
 
-# Inference binaries
+# Inference binaries and runtime data
 inference/qwen_ane
+inference/qwen05b.bin
+inference/.venv/
+inference/benchmark_results.json
 
 # Dynamic training binaries
 training/training_dynamic/train
@@ -57,6 +60,10 @@ training/tinystories_data00.bin
 training/ane_stories110M_ckpt.bin
 *.bin
 !training/download_data.sh
+
+# Secrets / env
+.env
+inference/.env
 
 # Internal / private
 .cursor/
