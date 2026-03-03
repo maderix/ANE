@@ -59,34 +59,50 @@ static NSData *build_blob_transposed(const float *w, int rows, int cols) {
     return [NSData dataWithBytesNoCopy:buf length:total freeWhenDone:YES];
 }
 
+static int g_fp16_io = 0;  // M1/M2: cast op unsupported, use fp16 I/O directly
+
 static NSString *gen_conv_mil(int in_ch, int out_ch, int sp) {
+    if (g_fp16_io) {
+        return [NSString stringWithFormat:
+            @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, 1, %d]> x) {\n"
+            "        tensor<fp16, [%d, %d, 1, 1]> W = const()[name = tensor<string, []>(\"W\"), "
+            "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
+            "        tensor<string, []> pt = const()[name = tensor<string, []>(\"pt\"), val = tensor<string, []>(\"valid\")];\n"
+            "        tensor<int32, [2]> st = const()[name = tensor<string, []>(\"st\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, [4]> pd = const()[name = tensor<string, []>(\"pd\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+            "        tensor<int32, [2]> dl = const()[name = tensor<string, []>(\"dl\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, []> gr = const()[name = tensor<string, []>(\"gr\"), val = tensor<int32, []>(1)];\n"
+            "        tensor<fp16, [1, %d, 1, %d]> y = conv(dilations = dl, groups = gr, pad = pd, "
+            "pad_type = pt, strides = st, weight = W, x = x)[name = tensor<string, []>(\"cv\")];\n"
+            "    } -> (y);\n}\n",
+            in_ch, sp, out_ch, in_ch, out_ch, in_ch, out_ch, sp];
+    }
     return [NSString stringWithFormat:
-        @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-        "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-        "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
-        "        string d1 = const()[name = string(\"d1\"), val = string(\"fp16\")];\n"
-        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = d1, x = x)[name = string(\"cx\")];\n"
-        "        tensor<fp16, [%d, %d, 1, 1]> W = const()[name = string(\"W\"), "
-        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = string(\"@model_path/weights/weight.bin\"), offset = uint64(64)))];\n"
-        "        string pt = const()[name = string(\"pt\"), val = string(\"valid\")];\n"
-        "        tensor<int32, [2]> st = const()[name = string(\"st\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        tensor<int32, [4]> pd = const()[name = string(\"pd\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
-        "        tensor<int32, [2]> dl = const()[name = string(\"dl\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        int32 gr = const()[name = string(\"gr\"), val = int32(1)];\n"
+        @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+        "    func main<ios16>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "        tensor<string, []> d1 = const()[name = tensor<string, []>(\"d1\"), val = tensor<string, []>(\"fp16\")];\n"
+        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = d1, x = x)[name = tensor<string, []>(\"cx\")];\n"
+        "        tensor<fp16, [%d, %d, 1, 1]> W = const()[name = tensor<string, []>(\"W\"), "
+        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
+        "        tensor<string, []> pt = const()[name = tensor<string, []>(\"pt\"), val = tensor<string, []>(\"valid\")];\n"
+        "        tensor<int32, [2]> st = const()[name = tensor<string, []>(\"st\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, [4]> pd = const()[name = tensor<string, []>(\"pd\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+        "        tensor<int32, [2]> dl = const()[name = tensor<string, []>(\"dl\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, []> gr = const()[name = tensor<string, []>(\"gr\"), val = tensor<int32, []>(1)];\n"
         "        tensor<fp16, [1, %d, 1, %d]> y16 = conv(dilations = dl, groups = gr, pad = pd, "
-        "pad_type = pt, strides = st, weight = W, x = x16)[name = string(\"cv\")];\n"
-        "        string d2 = const()[name = string(\"d2\"), val = string(\"fp32\")];\n"
-        "        tensor<fp32, [1, %d, 1, %d]> y = cast(dtype = d2, x = y16)[name = string(\"co\")];\n"
+        "pad_type = pt, strides = st, weight = W, x = x16)[name = tensor<string, []>(\"cv\")];\n"
+        "        tensor<string, []> d2 = const()[name = tensor<string, []>(\"d2\"), val = tensor<string, []>(\"fp32\")];\n"
+        "        tensor<fp32, [1, %d, 1, %d]> y = cast(dtype = d2, x = y16)[name = tensor<string, []>(\"co\")];\n"
         "    } -> (y);\n}\n",
         in_ch, sp, in_ch, sp, out_ch, in_ch, out_ch, in_ch, out_ch, sp, out_ch, sp];
 }
 
 typedef struct {
-    id model;
+    void *model;    // CFBridgingRetain'd _ANEInMemoryModel
     IOSurfaceRef ioIn, ioOut;
-    id request;
-    NSString *tmpDir;
+    void *request;  // CFBridgingRetain'd _ANERequest
+    void *tmpDir;   // CFBridgingRetain'd NSString
 } Kern;
 
 static Kern *compile_kern_with_blob(NSData *blob, int in_ch, int out_ch, int sp) {
@@ -103,9 +119,17 @@ static Kern *compile_kern_with_blob(NSData *blob, int in_ch, int out_ch, int sp)
     [milData writeToFile:[td stringByAppendingPathComponent:@"model.mil"] atomically:YES];
     [blob writeToFile:[td stringByAppendingPathComponent:@"weights/weight.bin"] atomically:YES];
     NSError *e = nil;
-    if (!((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(compileWithQoS:options:error:), 21, @{}, &e)) return NULL;
+    if (!((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(compileWithQoS:options:error:), 21, @{}, &e)) {
+        if (!g_fp16_io) {
+            printf("[ANE] fp32 compile failed, retrying with fp16 I/O (M1/M2 fallback)\n");
+            g_fp16_io = 1;
+            return compile_kern_with_blob(blob, in_ch, out_ch, sp);
+        }
+        return NULL;
+    }
     if (!((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(loadWithQoS:options:error:), 21, @{}, &e)) return NULL;
-    size_t inB = in_ch * sp * 4, outB = out_ch * sp * 4;
+    size_t bpe = g_fp16_io ? 2 : 4;
+    size_t inB = in_ch * sp * bpe, outB = out_ch * sp * bpe;
     IOSurfaceRef ioI = make_surface(inB), ioO = make_surface(outB);
     id wI = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), ioI);
     id wO = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), ioO);
@@ -113,40 +137,60 @@ static Kern *compile_kern_with_blob(NSData *blob, int in_ch, int out_ch, int sp)
         @selector(requestWithInputs:inputIndices:outputs:outputIndices:weightsBuffer:perfStats:procedureIndex:),
         @[wI], @[@0], @[wO], @[@0], nil, nil, @0);
     Kern *k = calloc(1, sizeof(Kern));
-    k->model = mdl; k->ioIn = ioI; k->ioOut = ioO; k->request = req; k->tmpDir = td;
+    k->model = (void*)CFBridgingRetain(mdl);
+    k->ioIn = ioI; k->ioOut = ioO;
+    k->request = (void*)CFBridgingRetain(req);
+    k->tmpDir = (void*)CFBridgingRetain(td);
     return k;
 }
 
 static void free_kern(Kern *k) {
     if (!k) return;
+    id mdl = (__bridge id)k->model;
     NSError *e = nil;
-    ((BOOL(*)(id,SEL,unsigned int,NSError**))objc_msgSend)(k->model, @selector(unloadWithQoS:error:), 21, &e);
+    ((BOOL(*)(id,SEL,unsigned int,NSError**))objc_msgSend)(mdl, @selector(unloadWithQoS:error:), 21, &e);
     CFRelease(k->ioIn); CFRelease(k->ioOut);
-    [[NSFileManager defaultManager] removeItemAtPath:k->tmpDir error:nil];
+    NSString *td = (__bridge id)k->tmpDir;
+    [[NSFileManager defaultManager] removeItemAtPath:td error:nil];
+    CFRelease(k->model); CFRelease(k->request); CFRelease(k->tmpDir);
     free(k);
 }
 
 // ANE eval: input [S, in_ch] row-major ↔ [in_ch, S] channels-first
 static void ane_eval(Kern *k, const float *in, float *out, int in_ch, int out_ch, int sp) {
-    float *tmp = (float*)malloc(in_ch * sp * sizeof(float));
-    for (int t = 0; t < sp; t++)
-        for (int c = 0; c < in_ch; c++)
-            tmp[c*sp + t] = in[t*in_ch + c];
     IOSurfaceLock(k->ioIn, 0, NULL);
-    memcpy(IOSurfaceGetBaseAddress(k->ioIn), tmp, in_ch * sp * sizeof(float));
+    void *base_in = IOSurfaceGetBaseAddress(k->ioIn);
+    if (g_fp16_io) {
+        _Float16 *dst = (_Float16*)base_in;
+        for (int t = 0; t < sp; t++)
+            for (int c = 0; c < in_ch; c++)
+                dst[c*sp + t] = (_Float16)in[t*in_ch + c];
+    } else {
+        float *dst = (float*)base_in;
+        for (int t = 0; t < sp; t++)
+            for (int c = 0; c < in_ch; c++)
+                dst[c*sp + t] = in[t*in_ch + c];
+    }
     IOSurfaceUnlock(k->ioIn, 0, NULL);
-    free(tmp);
     NSError *e = nil;
+    id mdl = (__bridge id)k->model;
+    id req = (__bridge id)k->request;
     ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(
-        k->model, @selector(evaluateWithQoS:options:request:error:), 21, @{}, k->request, &e);
-    float *tmp2 = (float*)malloc(out_ch * sp * sizeof(float));
+        mdl, @selector(evaluateWithQoS:options:request:error:), 21, @{}, req, &e);
     IOSurfaceLock(k->ioOut, kIOSurfaceLockReadOnly, NULL);
-    memcpy(tmp2, IOSurfaceGetBaseAddress(k->ioOut), out_ch * sp * sizeof(float));
+    void *base_out = IOSurfaceGetBaseAddress(k->ioOut);
+    if (g_fp16_io) {
+        _Float16 *src = (_Float16*)base_out;
+        for (int t = 0; t < sp; t++)
+            for (int c = 0; c < out_ch; c++)
+                out[t*out_ch + c] = (float)src[c*sp + t];
+    } else {
+        float *src = (float*)base_out;
+        for (int t = 0; t < sp; t++)
+            for (int c = 0; c < out_ch; c++)
+                out[t*out_ch + c] = src[c*sp + t];
+    }
     IOSurfaceUnlock(k->ioOut, kIOSurfaceLockReadOnly, NULL);
-    for (int t = 0; t < sp; t++)
-        for (int c = 0; c < out_ch; c++)
-            out[t*out_ch + c] = tmp2[c*sp + t];
-    free(tmp2);
 }
 
 int main(int argc, char *argv[]) {

@@ -187,13 +187,11 @@ int main() {
         printf("Test 1: no mask\n");
         {
             NSString *mil = [NSString stringWithFormat:
-                @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-                "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-                "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-                "    func main<ios18>(tensor<fp16, [1, %d, %d, %d]> q, "
+                @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp16, [1, %d, %d, %d]> q, "
                 "tensor<fp16, [1, %d, %d, %d]> k, tensor<fp16, [1, %d, %d, %d]> v) {\n"
                 "        tensor<fp16, [1, %d, %d, %d]> att = scaled_dot_product_attention("
-                "query = q, key = k, value = v)[name = string(\"sdpa\")];\n"
+                "query = q, key = k, value = v)[name = tensor<string, []>(\"sdpa\")];\n"
                 "    } -> (att);\n}\n",
                 HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, HD];
             Model m = compile_model(mil, nil);
@@ -209,14 +207,12 @@ int main() {
         {
             NSString *maskStr = build_inline_causal_mask(SEQ);
             NSString *mil = [NSString stringWithFormat:
-                @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-                "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-                "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-                "    func main<ios18>(tensor<fp16, [1, %d, %d, %d]> q, "
+                @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp16, [1, %d, %d, %d]> q, "
                 "tensor<fp16, [1, %d, %d, %d]> k, tensor<fp16, [1, %d, %d, %d]> v) {\n"
-                "        %@ mask = const()[name = string(\"mask\"), val = %@];\n"
+                "        %@ mask = const()[name = tensor<string, []>(\"mask\"), val = %@];\n"
                 "        tensor<fp16, [1, %d, %d, %d]> att = scaled_dot_product_attention("
-                "query = q, key = k, value = v, attn_mask = mask)[name = string(\"sdpa\")];\n"
+                "query = q, key = k, value = v, attn_mask = mask)[name = tensor<string, []>(\"sdpa\")];\n"
                 "    } -> (att);\n}\n",
                 HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, HD,
                 [NSString stringWithFormat:@"tensor<fp16, [1, 1, %d, %d]>", SEQ, SEQ], maskStr,
@@ -233,15 +229,13 @@ int main() {
         printf("\nTest 3: BLOBFILE causal mask\n");
         {
             NSString *mil = [NSString stringWithFormat:
-                @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-                "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-                "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-                "    func main<ios18>(tensor<fp16, [1, %d, %d, %d]> q, "
+                @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp16, [1, %d, %d, %d]> q, "
                 "tensor<fp16, [1, %d, %d, %d]> k, tensor<fp16, [1, %d, %d, %d]> v) {\n"
-                "        tensor<fp16, [1, 1, %d, %d]> mask = const()[name = string(\"mask\"), "
-                "val = tensor<fp16, [1, 1, %d, %d]>(BLOBFILE(path = string(\"@model_path/weights/mask.bin\"), offset = uint64(64)))];\n"
+                "        tensor<fp16, [1, 1, %d, %d]> mask = const()[name = tensor<string, []>(\"mask\"), "
+                "val = tensor<fp16, [1, 1, %d, %d]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/mask.bin\"), offset = tensor<uint64, []>(64)))];\n"
                 "        tensor<fp16, [1, %d, %d, %d]> att = scaled_dot_product_attention("
-                "query = q, key = k, value = v, attn_mask = mask)[name = string(\"sdpa\")];\n"
+                "query = q, key = k, value = v, attn_mask = mask)[name = tensor<string, []>(\"sdpa\")];\n"
                 "    } -> (att);\n}\n",
                 HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, HD,
                 SEQ, SEQ, SEQ, SEQ, HEADS, SEQ, HD];
@@ -258,14 +252,12 @@ int main() {
         printf("\nTest 4: mask as runtime input\n");
         {
             NSString *mil = [NSString stringWithFormat:
-                @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-                "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-                "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-                "    func main<ios18>(tensor<fp16, [1, %d, %d, %d]> q, "
+                @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp16, [1, %d, %d, %d]> q, "
                 "tensor<fp16, [1, %d, %d, %d]> k, tensor<fp16, [1, %d, %d, %d]> v, "
                 "tensor<fp16, [1, 1, %d, %d]> mask) {\n"
                 "        tensor<fp16, [1, %d, %d, %d]> att = scaled_dot_product_attention("
-                "query = q, key = k, value = v, attn_mask = mask)[name = string(\"sdpa\")];\n"
+                "query = q, key = k, value = v, attn_mask = mask)[name = tensor<string, []>(\"sdpa\")];\n"
                 "    } -> (att);\n}\n",
                 HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, HD,
                 SEQ, SEQ, HEADS, SEQ, HD];

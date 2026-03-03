@@ -5,6 +5,9 @@
 #include <string.h>
 #include <math.h>
 
+// Set by caller: 1 = fp16 I/O (M1/M2 fallback, no cast ops), 0 = fp32 I/O with cast (M4+)
+extern int g_fp16_io;
+
 // Build an FP16 weight blob with the required header structure.
 // weights_f32: source weights in row-major [out_ch, in_ch]
 // Returns NSData with header + FP16 weights
@@ -30,21 +33,32 @@ static NSData *mil_build_weight_blob(const float *weights_f32, int out_ch, int i
 // Input W: [1, out_ch, in_ch] fp32
 // Output:  [1, out_ch, spatial] fp32
 static NSString *mil_gen_matmul(int in_ch, int out_ch, int spatial) {
+    if (g_fp16_io) {
+        return [NSString stringWithFormat:
+            @"program(1.0)\n"
+            "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
+            "{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, %d]> x, tensor<fp16, [1, %d, %d]> W) {\n"
+            "        tensor<bool, []> tx = const()[name = tensor<string, []>(\"tx\"), val = tensor<bool, []>(false)];\n"
+            "        tensor<bool, []> ty = const()[name = tensor<string, []>(\"ty\"), val = tensor<bool, []>(false)];\n"
+            "        tensor<fp16, [1, %d, %d]> y = matmul(transpose_x = tx, transpose_y = ty, x = W, y = x)[name = tensor<string, []>(\"mm\")];\n"
+            "    } -> (y);\n"
+            "}\n",
+            in_ch, spatial, out_ch, in_ch, out_ch, spatial];
+    }
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
-        "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-        "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-        "{\"coremltools-version\", \"9.0\"}})]\n"
+        @"program(1.0)\n"
+        "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, %d]> x, tensor<fp32, [1, %d, %d]> W) {\n"
-        "        string to_fp16 = const()[name = string(\"to_fp16\"), val = string(\"fp16\")];\n"
-        "        tensor<fp16, [1, %d, %d]> x16 = cast(dtype = to_fp16, x = x)[name = string(\"cast_x\")];\n"
-        "        tensor<fp16, [1, %d, %d]> W16 = cast(dtype = to_fp16, x = W)[name = string(\"cast_W\")];\n"
-        "        bool tx = const()[name = string(\"tx\"), val = bool(false)];\n"
-        "        bool ty = const()[name = string(\"ty\"), val = bool(false)];\n"
-        "        tensor<fp16, [1, %d, %d]> y16 = matmul(transpose_x = tx, transpose_y = ty, x = W16, y = x16)[name = string(\"mm\")];\n"
-        "        string to_fp32 = const()[name = string(\"to_fp32\"), val = string(\"fp32\")];\n"
-        "        tensor<fp32, [1, %d, %d]> y = cast(dtype = to_fp32, x = y16)[name = string(\"cast_out\")];\n"
+        "    func main<ios16>(tensor<fp32, [1, %d, %d]> x, tensor<fp32, [1, %d, %d]> W) {\n"
+        "        tensor<string, []> to_fp16 = const()[name = tensor<string, []>(\"to_fp16\"), val = tensor<string, []>(\"fp16\")];\n"
+        "        tensor<fp16, [1, %d, %d]> x16 = cast(dtype = to_fp16, x = x)[name = tensor<string, []>(\"cast_x\")];\n"
+        "        tensor<fp16, [1, %d, %d]> W16 = cast(dtype = to_fp16, x = W)[name = tensor<string, []>(\"cast_W\")];\n"
+        "        tensor<bool, []> tx = const()[name = tensor<string, []>(\"tx\"), val = tensor<bool, []>(false)];\n"
+        "        tensor<bool, []> ty = const()[name = tensor<string, []>(\"ty\"), val = tensor<bool, []>(false)];\n"
+        "        tensor<fp16, [1, %d, %d]> y16 = matmul(transpose_x = tx, transpose_y = ty, x = W16, y = x16)[name = tensor<string, []>(\"mm\")];\n"
+        "        tensor<string, []> to_fp32 = const()[name = tensor<string, []>(\"to_fp32\"), val = tensor<string, []>(\"fp32\")];\n"
+        "        tensor<fp32, [1, %d, %d]> y = cast(dtype = to_fp32, x = y16)[name = tensor<string, []>(\"cast_out\")];\n"
         "    } -> (y);\n"
         "}\n",
         in_ch, spatial, out_ch, in_ch,
@@ -54,26 +68,45 @@ static NSString *mil_gen_matmul(int in_ch, int out_ch, int spatial) {
 
 // Keep the baked-weight version for reference (used in inference-only scenarios)
 static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
+    if (g_fp16_io) {
+        return [NSString stringWithFormat:
+            @"program(1.0)\n"
+            "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
+            "{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, 1, %d]> x) {\n"
+            "        tensor<string, []> c_pad_type = const()[name = tensor<string, []>(\"c_pad_type\"), val = tensor<string, []>(\"valid\")];\n"
+            "        tensor<int32, [2]> c_strides = const()[name = tensor<string, []>(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, [4]> c_pad = const()[name = tensor<string, []>(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+            "        tensor<int32, [2]> c_dilations = const()[name = tensor<string, []>(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, []> c_groups = const()[name = tensor<string, []>(\"c_groups\"), val = tensor<int32, []>(1)];\n"
+            "        tensor<fp16, [%d, %d, 1, 1]> W = const()[name = tensor<string, []>(\"W\"), "
+            "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
+            "        tensor<fp16, [1, %d, 1, %d]> y = conv(dilations = c_dilations, groups = c_groups, "
+            "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W, x = x)[name = tensor<string, []>(\"conv\")];\n"
+            "    } -> (y);\n"
+            "}\n",
+            in_ch, spatial,
+            out_ch, in_ch, out_ch, in_ch,
+            out_ch, spatial];
+    }
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
-        "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-        "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-        "{\"coremltools-version\", \"9.0\"}})]\n"
+        @"program(1.0)\n"
+        "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
-        "        string c_pad_type = const()[name = string(\"c_pad_type\"), val = string(\"valid\")];\n"
-        "        tensor<int32, [2]> c_strides = const()[name = string(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        tensor<int32, [4]> c_pad = const()[name = string(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
-        "        tensor<int32, [2]> c_dilations = const()[name = string(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        int32 c_groups = const()[name = string(\"c_groups\"), val = int32(1)];\n"
-        "        string to_fp16 = const()[name = string(\"to_fp16\"), val = string(\"fp16\")];\n"
-        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = to_fp16, x = x)[name = string(\"cast_in\")];\n"
-        "        tensor<fp16, [%d, %d, 1, 1]> W = const()[name = string(\"W\"), "
-        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = string(\"@model_path/weights/weight.bin\"), offset = uint64(64)))];\n"
+        "    func main<ios16>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "        tensor<string, []> c_pad_type = const()[name = tensor<string, []>(\"c_pad_type\"), val = tensor<string, []>(\"valid\")];\n"
+        "        tensor<int32, [2]> c_strides = const()[name = tensor<string, []>(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, [4]> c_pad = const()[name = tensor<string, []>(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+        "        tensor<int32, [2]> c_dilations = const()[name = tensor<string, []>(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, []> c_groups = const()[name = tensor<string, []>(\"c_groups\"), val = tensor<int32, []>(1)];\n"
+        "        tensor<string, []> to_fp16 = const()[name = tensor<string, []>(\"to_fp16\"), val = tensor<string, []>(\"fp16\")];\n"
+        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = to_fp16, x = x)[name = tensor<string, []>(\"cast_in\")];\n"
+        "        tensor<fp16, [%d, %d, 1, 1]> W = const()[name = tensor<string, []>(\"W\"), "
+        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
         "        tensor<fp16, [1, %d, 1, %d]> y16 = conv(dilations = c_dilations, groups = c_groups, "
-        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W, x = x16)[name = string(\"conv\")];\n"
-        "        string to_fp32 = const()[name = string(\"to_fp32\"), val = string(\"fp32\")];\n"
-        "        tensor<fp32, [1, %d, 1, %d]> y = cast(dtype = to_fp32, x = y16)[name = string(\"cast_out\")];\n"
+        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W, x = x16)[name = tensor<string, []>(\"conv\")];\n"
+        "        tensor<string, []> to_fp32 = const()[name = tensor<string, []>(\"to_fp32\"), val = tensor<string, []>(\"fp32\")];\n"
+        "        tensor<fp32, [1, %d, 1, %d]> y = cast(dtype = to_fp32, x = y16)[name = tensor<string, []>(\"cast_out\")];\n"
         "    } -> (y);\n"
         "}\n",
         in_ch, spatial, in_ch, spatial,
@@ -88,36 +121,65 @@ static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
 // where cs = 64 + dim*dim*2
 static NSString *mil_gen_qkv(int dim, int spatial) {
     NSUInteger cs = 64 + (NSUInteger)dim * dim * 2;
+    if (g_fp16_io) {
+        return [NSString stringWithFormat:
+            @"program(1.0)\n"
+            "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
+            "{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, 1, %d]> x) {\n"
+            "        tensor<string, []> c_pad_type = const()[name = tensor<string, []>(\"c_pad_type\"), val = tensor<string, []>(\"valid\")];\n"
+            "        tensor<int32, [2]> c_strides = const()[name = tensor<string, []>(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, [4]> c_pad = const()[name = tensor<string, []>(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+            "        tensor<int32, [2]> c_dilations = const()[name = tensor<string, []>(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, []> c_groups = const()[name = tensor<string, []>(\"c_groups\"), val = tensor<int32, []>(1)];\n"
+            "        tensor<fp16, [%d, %d, 1, 1]> Wq = const()[name = tensor<string, []>(\"Wq\"), "
+            "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
+            "        tensor<fp16, [%d, %d, 1, 1]> Wk = const()[name = tensor<string, []>(\"Wk\"), "
+            "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(%lu)))];\n"
+            "        tensor<fp16, [%d, %d, 1, 1]> Wv = const()[name = tensor<string, []>(\"Wv\"), "
+            "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(%lu)))];\n"
+            "        tensor<fp16, [1, %d, 1, %d]> q = conv(dilations = c_dilations, groups = c_groups, "
+            "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wq, x = x)[name = tensor<string, []>(\"conv_q\")];\n"
+            "        tensor<fp16, [1, %d, 1, %d]> k = conv(dilations = c_dilations, groups = c_groups, "
+            "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wk, x = x)[name = tensor<string, []>(\"conv_k\")];\n"
+            "        tensor<fp16, [1, %d, 1, %d]> v = conv(dilations = c_dilations, groups = c_groups, "
+            "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wv, x = x)[name = tensor<string, []>(\"conv_v\")];\n"
+            "    } -> (q, k, v);\n"
+            "}\n",
+            dim, spatial,
+            dim, dim, dim, dim,
+            dim, dim, dim, dim, (unsigned long)(64 + cs),
+            dim, dim, dim, dim, (unsigned long)(64 + 2*cs),
+            dim, spatial, dim, spatial, dim, spatial];
+    }
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
-        "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-        "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-        "{\"coremltools-version\", \"9.0\"}})]\n"
+        @"program(1.0)\n"
+        "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
-        "        string c_pad_type = const()[name = string(\"c_pad_type\"), val = string(\"valid\")];\n"
-        "        tensor<int32, [2]> c_strides = const()[name = string(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        tensor<int32, [4]> c_pad = const()[name = string(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
-        "        tensor<int32, [2]> c_dilations = const()[name = string(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        int32 c_groups = const()[name = string(\"c_groups\"), val = int32(1)];\n"
-        "        string to_fp16 = const()[name = string(\"to_fp16\"), val = string(\"fp16\")];\n"
-        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = to_fp16, x = x)[name = string(\"cast_in\")];\n"
-        "        tensor<fp16, [%d, %d, 1, 1]> Wq = const()[name = string(\"Wq\"), "
-        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = string(\"@model_path/weights/weight.bin\"), offset = uint64(64)))];\n"
-        "        tensor<fp16, [%d, %d, 1, 1]> Wk = const()[name = string(\"Wk\"), "
-        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = string(\"@model_path/weights/weight.bin\"), offset = uint64(%lu)))];\n"
-        "        tensor<fp16, [%d, %d, 1, 1]> Wv = const()[name = string(\"Wv\"), "
-        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = string(\"@model_path/weights/weight.bin\"), offset = uint64(%lu)))];\n"
+        "    func main<ios16>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "        tensor<string, []> c_pad_type = const()[name = tensor<string, []>(\"c_pad_type\"), val = tensor<string, []>(\"valid\")];\n"
+        "        tensor<int32, [2]> c_strides = const()[name = tensor<string, []>(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, [4]> c_pad = const()[name = tensor<string, []>(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+        "        tensor<int32, [2]> c_dilations = const()[name = tensor<string, []>(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, []> c_groups = const()[name = tensor<string, []>(\"c_groups\"), val = tensor<int32, []>(1)];\n"
+        "        tensor<string, []> to_fp16 = const()[name = tensor<string, []>(\"to_fp16\"), val = tensor<string, []>(\"fp16\")];\n"
+        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = to_fp16, x = x)[name = tensor<string, []>(\"cast_in\")];\n"
+        "        tensor<fp16, [%d, %d, 1, 1]> Wq = const()[name = tensor<string, []>(\"Wq\"), "
+        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
+        "        tensor<fp16, [%d, %d, 1, 1]> Wk = const()[name = tensor<string, []>(\"Wk\"), "
+        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(%lu)))];\n"
+        "        tensor<fp16, [%d, %d, 1, 1]> Wv = const()[name = tensor<string, []>(\"Wv\"), "
+        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(%lu)))];\n"
         "        tensor<fp16, [1, %d, 1, %d]> q16 = conv(dilations = c_dilations, groups = c_groups, "
-        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wq, x = x16)[name = string(\"conv_q\")];\n"
+        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wq, x = x16)[name = tensor<string, []>(\"conv_q\")];\n"
         "        tensor<fp16, [1, %d, 1, %d]> k16 = conv(dilations = c_dilations, groups = c_groups, "
-        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wk, x = x16)[name = string(\"conv_k\")];\n"
+        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wk, x = x16)[name = tensor<string, []>(\"conv_k\")];\n"
         "        tensor<fp16, [1, %d, 1, %d]> v16 = conv(dilations = c_dilations, groups = c_groups, "
-        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wv, x = x16)[name = string(\"conv_v\")];\n"
-        "        string to_fp32 = const()[name = string(\"to_fp32\"), val = string(\"fp32\")];\n"
-        "        tensor<fp32, [1, %d, 1, %d]> q = cast(dtype = to_fp32, x = q16)[name = string(\"cast_q\")];\n"
-        "        tensor<fp32, [1, %d, 1, %d]> k = cast(dtype = to_fp32, x = k16)[name = string(\"cast_k\")];\n"
-        "        tensor<fp32, [1, %d, 1, %d]> v = cast(dtype = to_fp32, x = v16)[name = string(\"cast_v\")];\n"
+        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = Wv, x = x16)[name = tensor<string, []>(\"conv_v\")];\n"
+        "        tensor<string, []> to_fp32 = const()[name = tensor<string, []>(\"to_fp32\"), val = tensor<string, []>(\"fp32\")];\n"
+        "        tensor<fp32, [1, %d, 1, %d]> q = cast(dtype = to_fp32, x = q16)[name = tensor<string, []>(\"cast_q\")];\n"
+        "        tensor<fp32, [1, %d, 1, %d]> k = cast(dtype = to_fp32, x = k16)[name = tensor<string, []>(\"cast_k\")];\n"
+        "        tensor<fp32, [1, %d, 1, %d]> v = cast(dtype = to_fp32, x = v16)[name = tensor<string, []>(\"cast_v\")];\n"
         "    } -> (q, k, v);\n"
         "}\n",
         dim, spatial, dim, spatial,
@@ -173,31 +235,55 @@ static NSData *mil_build_ffn_up_weight_blob(const float *w1, const float *w3, in
 // Generate MIL for fused FFN up: w1 + w3 parallel convs
 static NSString *mil_gen_ffn_up(int dim, int hidden_dim, int spatial) {
     NSUInteger cs = 64 + (NSUInteger)hidden_dim * dim * 2;
+    if (g_fp16_io) {
+        return [NSString stringWithFormat:
+            @"program(1.0)\n"
+            "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
+            "{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, 1, %d]> x) {\n"
+            "        tensor<string, []> c_pad_type = const()[name = tensor<string, []>(\"c_pad_type\"), val = tensor<string, []>(\"valid\")];\n"
+            "        tensor<int32, [2]> c_strides = const()[name = tensor<string, []>(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, [4]> c_pad = const()[name = tensor<string, []>(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+            "        tensor<int32, [2]> c_dilations = const()[name = tensor<string, []>(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
+            "        tensor<int32, []> c_groups = const()[name = tensor<string, []>(\"c_groups\"), val = tensor<int32, []>(1)];\n"
+            "        tensor<fp16, [%d, %d, 1, 1]> W1 = const()[name = tensor<string, []>(\"W1\"), "
+            "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
+            "        tensor<fp16, [%d, %d, 1, 1]> W3 = const()[name = tensor<string, []>(\"W3\"), "
+            "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(%lu)))];\n"
+            "        tensor<fp16, [1, %d, 1, %d]> out1 = conv(dilations = c_dilations, groups = c_groups, "
+            "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W1, x = x)[name = tensor<string, []>(\"conv_w1\")];\n"
+            "        tensor<fp16, [1, %d, 1, %d]> out3 = conv(dilations = c_dilations, groups = c_groups, "
+            "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W3, x = x)[name = tensor<string, []>(\"conv_w3\")];\n"
+            "    } -> (out1, out3);\n"
+            "}\n",
+            dim, spatial,
+            hidden_dim, dim, hidden_dim, dim,
+            hidden_dim, dim, hidden_dim, dim, (unsigned long)(64 + cs),
+            hidden_dim, spatial, hidden_dim, spatial];
+    }
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
-        "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-        "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-        "{\"coremltools-version\", \"9.0\"}})]\n"
+        @"program(1.0)\n"
+        "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
-        "        string c_pad_type = const()[name = string(\"c_pad_type\"), val = string(\"valid\")];\n"
-        "        tensor<int32, [2]> c_strides = const()[name = string(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        tensor<int32, [4]> c_pad = const()[name = string(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
-        "        tensor<int32, [2]> c_dilations = const()[name = string(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
-        "        int32 c_groups = const()[name = string(\"c_groups\"), val = int32(1)];\n"
-        "        string to_fp16 = const()[name = string(\"to_fp16\"), val = string(\"fp16\")];\n"
-        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = to_fp16, x = x)[name = string(\"cast_in\")];\n"
-        "        tensor<fp16, [%d, %d, 1, 1]> W1 = const()[name = string(\"W1\"), "
-        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = string(\"@model_path/weights/weight.bin\"), offset = uint64(64)))];\n"
-        "        tensor<fp16, [%d, %d, 1, 1]> W3 = const()[name = string(\"W3\"), "
-        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = string(\"@model_path/weights/weight.bin\"), offset = uint64(%lu)))];\n"
+        "    func main<ios16>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "        tensor<string, []> c_pad_type = const()[name = tensor<string, []>(\"c_pad_type\"), val = tensor<string, []>(\"valid\")];\n"
+        "        tensor<int32, [2]> c_strides = const()[name = tensor<string, []>(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, [4]> c_pad = const()[name = tensor<string, []>(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
+        "        tensor<int32, [2]> c_dilations = const()[name = tensor<string, []>(\"c_dilations\"), val = tensor<int32, [2]>([1, 1])];\n"
+        "        tensor<int32, []> c_groups = const()[name = tensor<string, []>(\"c_groups\"), val = tensor<int32, []>(1)];\n"
+        "        tensor<string, []> to_fp16 = const()[name = tensor<string, []>(\"to_fp16\"), val = tensor<string, []>(\"fp16\")];\n"
+        "        tensor<fp16, [1, %d, 1, %d]> x16 = cast(dtype = to_fp16, x = x)[name = tensor<string, []>(\"cast_in\")];\n"
+        "        tensor<fp16, [%d, %d, 1, 1]> W1 = const()[name = tensor<string, []>(\"W1\"), "
+        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(64)))];\n"
+        "        tensor<fp16, [%d, %d, 1, 1]> W3 = const()[name = tensor<string, []>(\"W3\"), "
+        "val = tensor<fp16, [%d, %d, 1, 1]>(BLOBFILE(path = tensor<string, []>(\"@model_path/weights/weight.bin\"), offset = tensor<uint64, []>(%lu)))];\n"
         "        tensor<fp16, [1, %d, 1, %d]> h1 = conv(dilations = c_dilations, groups = c_groups, "
-        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W1, x = x16)[name = string(\"conv_w1\")];\n"
+        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W1, x = x16)[name = tensor<string, []>(\"conv_w1\")];\n"
         "        tensor<fp16, [1, %d, 1, %d]> h3 = conv(dilations = c_dilations, groups = c_groups, "
-        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W3, x = x16)[name = string(\"conv_w3\")];\n"
-        "        string to_fp32 = const()[name = string(\"to_fp32\"), val = string(\"fp32\")];\n"
-        "        tensor<fp32, [1, %d, 1, %d]> out1 = cast(dtype = to_fp32, x = h1)[name = string(\"cast_h1\")];\n"
-        "        tensor<fp32, [1, %d, 1, %d]> out3 = cast(dtype = to_fp32, x = h3)[name = string(\"cast_h3\")];\n"
+        "pad = c_pad, pad_type = c_pad_type, strides = c_strides, weight = W3, x = x16)[name = tensor<string, []>(\"conv_w3\")];\n"
+        "        tensor<string, []> to_fp32 = const()[name = tensor<string, []>(\"to_fp32\"), val = tensor<string, []>(\"fp32\")];\n"
+        "        tensor<fp32, [1, %d, 1, %d]> out1 = cast(dtype = to_fp32, x = h1)[name = tensor<string, []>(\"cast_h1\")];\n"
+        "        tensor<fp32, [1, %d, 1, %d]> out3 = cast(dtype = to_fp32, x = h3)[name = tensor<string, []>(\"cast_h3\")];\n"
         "    } -> (out1, out3);\n"
         "}\n",
         dim, spatial, dim, spatial,
