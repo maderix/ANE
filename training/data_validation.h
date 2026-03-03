@@ -16,6 +16,14 @@ typedef struct {
     uint16_t bad_token;
 } TokenDataValidationError;
 
+// Token files are 16-bit ids. Return false when byte length is misaligned.
+static inline bool token_data_bytes_to_token_count(size_t n_bytes, size_t *n_tokens, size_t *extra_bytes) {
+    size_t rem = n_bytes % sizeof(uint16_t);
+    if (n_tokens) *n_tokens = n_bytes / sizeof(uint16_t);
+    if (extra_bytes) *extra_bytes = rem;
+    return rem == 0;
+}
+
 static inline bool token_data_has_min_tokens(size_t n_tokens, int seq, size_t *required_tokens) {
     if (seq < 0) return false;
     size_t needed = (size_t)seq + 1;
