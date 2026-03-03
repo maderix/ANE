@@ -11,6 +11,9 @@ train: train.m ane_runtime.h ane_mil_gen.h model.h forward.h backward.h
 train_large: train_large.m $(HEADERS_LARGE)
 	$(CC) $(CFLAGS) -o $@ train_large.m $(LDFLAGS) -framework Accelerate
 
+benchmark_ane: benchmark_ane.m $(HEADERS_LARGE)
+	$(CC) $(CFLAGS) -o $@ benchmark_ane.m $(LDFLAGS) -framework Accelerate
+
 PROBES = test_weight_reload test_perf_stats test_qos_sweep test_ane_advanced
 
 test_weight_reload: test_weight_reload.m

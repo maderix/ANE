@@ -21,7 +21,7 @@
 #define HD (DIM/HEADS)
 #define SEQ 256
 #define NLAYERS 12
-#define VOCAB 32000
+#define VOCAB 5000
 #define ACCUM_STEPS 10
 #define MAX_COMPILES 100
 
@@ -86,7 +86,7 @@ typedef struct {
 } LayerGrads;
 
 // ANE kernels per layer
-typedef struct { void *model; IOSurfaceRef ioIn, ioOut; void *request; void *tmpDir; } Kern;
+typedef struct { void *model; IOSurfaceRef *inputs; int n_inputs; IOSurfaceRef ioOut; void *request; void *tmpDir; } Kern;
 typedef struct {
     Kern *fwdAttn, *fwdFFN, *ffnBwd, *sdpaBwd1, *sdpaBwd2, *qkvBwd;
 } LayerKernels;

@@ -1,0 +1,29 @@
+# Binaries
+*.txt
+train
+train_large
+benchmark_ane
+test_weight_reload
+test_perf_stats
+test_qos_sweep
+test_ane_advanced
+
+# Data and Checkpoints
+*.bin
+!../../assets/models/*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# OS files
+.DS_Store
+
+# Temporary files
+*.tmp
+*.log

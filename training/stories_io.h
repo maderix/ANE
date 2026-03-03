@@ -82,9 +82,15 @@ static void io_write_fp16_at(IOSurfaceRef s, int ch_off, const float *data, int 
     cvt_f32_f16((_Float16*)IOSurfaceGetBaseAddress(s) + ch_off * sp, data, channels * sp);
     IOSurfaceUnlock(s, 0, NULL);
 }
+static void io_write_fp16_t(IOSurfaceRef s, const float *w, int rows, int cols) {
+    IOSurfaceLock(s, 0, NULL);
+    _Float16 *f16 = (_Float16*)IOSurfaceGetBaseAddress(s);
+    for(int i=0;i<rows;i++) for(int j=0;j<cols;j++) f16[j*rows+i]=(_Float16)w[i*cols+j];
+    IOSurfaceUnlock(s, 0, NULL);
+}
 
 // Kernel compile/eval
-static Kern *compile_kern_mil_w(NSString *mil, NSDictionary *weights, int ic_bytes, int oc_bytes) {
+static Kern *compile_kern_mil_w(NSString *mil, NSDictionary *weights, int *in_sizes, int n_in, int oc_bytes) {
     @autoreleasepool {
     NSData *md = [mil dataUsingEncoding:NSUTF8StringEncoding];
     id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(g_D, @selector(modelWithMILText:weights:optionsPlist:), md, weights, nil);
@@ -108,13 +114,20 @@ static Kern *compile_kern_mil_w(NSString *mil, NSDictionary *weights, int ic_byt
     __sync_fetch_and_add(&g_compile_count, 1);
     Kern *k = (Kern*)calloc(1, sizeof(Kern));
     k->model = (void*)CFBridgingRetain(mdl);
-    k->ioIn = make_surface(ic_bytes);
+    k->n_inputs = n_in;
+    k->inputs = (IOSurfaceRef*)calloc(n_in, sizeof(IOSurfaceRef));
+    NSMutableArray *inObs = [NSMutableArray array];
+    NSMutableArray *inIdx = [NSMutableArray array];
+    for(int i=0; i<n_in; i++) {
+        k->inputs[i] = make_surface(in_sizes[i]);
+        [inObs addObject:((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), k->inputs[i])];
+        [inIdx addObject:@(i)];
+    }
     k->ioOut = make_surface(oc_bytes);
-    id wI = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), k->ioIn);
     id wO = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), k->ioOut);
     k->request = (void*)CFBridgingRetain(((id(*)(Class,SEL,id,id,id,id,id,id,id))objc_msgSend)(g_AR,
         @selector(requestWithInputs:inputIndices:outputs:outputIndices:weightsBuffer:perfStats:procedureIndex:),
-        @[wI], @[@0], @[wO], @[@0], nil, nil, @0));
+        inObs, inIdx, @[wO], @[@0], nil, nil, @0));
     k->tmpDir = (void*)CFBridgingRetain(td);
     return k;
     }
@@ -123,7 +136,9 @@ static void free_kern(Kern *k) {
     if (!k) return;
     id mdl = (__bridge id)k->model; NSError *e = nil;
     ((BOOL(*)(id,SEL,unsigned int,NSError**))objc_msgSend)(mdl, @selector(unloadWithQoS:error:), 21, &e);
-    CFRelease(k->ioIn); CFRelease(k->ioOut);
+    for(int i=0; i<k->n_inputs; i++) CFRelease(k->inputs[i]);
+    free(k->inputs);
+    CFRelease(k->ioOut);
     [[NSFileManager defaultManager] removeItemAtPath:(__bridge id)k->tmpDir error:nil];
     CFRelease(k->model); CFRelease(k->request); CFRelease(k->tmpDir);
     free(k);
