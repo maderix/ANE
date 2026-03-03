@@ -1,0 +1,64 @@
+# Build artifacts
+*.o
+*.dSYM/
+
+# Root-level compiled binaries
+ane_probe
+api_explore
+inmem_basic
+inmem_bench
+inmem_peak
+sram_bench
+sram_probe
+
+# Training binaries
+tiny_train
+tiny_train_m1
+train_large
+training/train_large
+training/train_large_ane
+training/test_*
+!training/test_*.m
+
+# Test/research binaries
+test_chaining
+
+# Generated mlpackage files
+/tmp/ane_*.mlpackage
+
+# Benchmark results (keep community_benchmarks/ submissions)
+benchmark_results_*.txt
+community_benchmarks/SUMMARY.json
+community_benchmarks/SUMMARY.md
+community_benchmarks/apple_m4_max_20260303_*.json
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+/tmp/ane_venv/
+
+# Training data (downloaded separately)
+assets/
+
+# Web dashboard (lives in separate private repo)
+web/
+
+# Training data binaries (downloaded via make setup)
+training/tinystories_data00.bin
+training/ane_stories110M_ckpt.bin
+*.bin
+!training/download_data.sh
+
+# Internal / private
+.cursor/
+docs/launch/
+comm
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
