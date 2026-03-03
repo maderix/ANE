@@ -80,6 +80,10 @@ bash download_data.sh
 
 Downloads pretokenized TinyStories (Llama 2 BPE, 32K vocab) from HuggingFace. Produces `tinystories_data00.bin` (~41 MB, ~20M tokens).
 
+All training pipelines perform token-data validation at startup:
+- token file must contain at least `SEQ+1` tokens
+- every token id must be within `[0, vocab_size)`
+
 ### 2. Build & Train
 
 ```bash
