@@ -8,7 +8,13 @@
 #include "stories_mil.h"
 #include "stories_cpu_ops.h"
 
-#define CKPT_PATH "ane_stories110M_ckpt.bin"
+// Double-buffer needs more compile budget than single-buffer
+// The original MAX_COMPILES=100 only allows 1 batch per exec() restart
+// We push higher to allow initial compile + at least 1 background compile
+// If ANE rejects at ~119, the exec() restart will handle it gracefully
+#define DB_MAX_COMPILES 250
+
+#define CKPT_PATH "ane_db_ckpt.bin"
 #define MODEL_PATH "../../assets/models/stories110M.bin"
 #define DATA_PATH "tinystories_data00.bin"
 
@@ -384,8 +390,8 @@ int main(int argc, char *argv[]) {
         double total_stall_ms = 0;
 
         while (step < total_steps) {
-            // Check compile budget — need room for one more background compile
-            if (g_compile_count + 2*TOTAL_WEIGHT_KERNELS > MAX_COMPILES) {
+            // Check compile budget
+            if (g_compile_count + TOTAL_WEIGHT_KERNELS > DB_MAX_COMPILES) {
                 // Wait for any in-flight background compile
                 dispatch_sync(compile_q, ^{});
                 for (int L=0; L<NLAYERS; L++) {
@@ -695,8 +701,9 @@ int main(int argc, char *argv[]) {
 
             // ===== DOUBLE-BUFFER: Start background compile with updated weights =====
             batches_since_swap++;
+            // Only start bg compile if we have budget
             if (!atomic_load(&bg_compile_running) &&
-                g_compile_count + TOTAL_WEIGHT_KERNELS <= MAX_COMPILES) {
+                g_compile_count + TOTAL_WEIGHT_KERNELS <= DB_MAX_COMPILES) {
                 atomic_store(&bg_compile_running, true);
                 // Capture pointers (not stack arrays) for background block
                 LayerKernels *bg_target = kern_pending;
