@@ -6,7 +6,12 @@ Source: ~/tiny_stories_data_pretokenized.zip"""
 import os, struct, zipfile
 from pathlib import Path
 
-ZIP_PATH = os.path.expanduser('~/tiny_stories_data_pretokenized.zip')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Look for zip in local directory
+ZIP_PATH = os.path.join(BASE_DIR, 'tiny_stories_data_pretokenized.zip')
+if not os.path.exists(ZIP_PATH):
+    # Fallback to local name if not in base dir
+    ZIP_PATH = 'tiny_stories_data_pretokenized.zip'
 OUTPUT_PATH = str(Path(__file__).resolve().parent / 'tinystories_data00.bin')
 
 def main():

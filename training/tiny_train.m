@@ -164,7 +164,7 @@ static void ane_eval_k(Kern *k, const float *in, float *out, int in_ch, int out_
 }
 
 // === Checkpoint: save/restore training state for exec() restart ===
-#define CKPT_PATH "/tmp/ane_train_ckpt.bin"
+#define CKPT_PATH "ane_train_ckpt.bin"
 
 typedef struct {
     int step;

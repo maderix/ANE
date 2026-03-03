@@ -2,9 +2,10 @@ import json
 import struct
 
 # Minimal BPE encoder for TinyStories
-RAW_TEXT_PATH = "/Users/andy.huang/lab/research/ANE/training/tinystories_raw.txt"
-VOCAB_PATH = "/Users/andy.huang/lab/research/ANE/training/vocab.json"
-OUTPUT_PATH = "/Users/andy.huang/lab/research/ANE/training/tinystories_data00.bin"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RAW_TEXT_PATH = os.path.join(BASE_DIR, "tinystories_raw.txt")
+VOCAB_PATH = os.path.join(BASE_DIR, "vocab.json")
+OUTPUT_PATH = os.path.join(BASE_DIR, "tinystories_data00.bin")
 
 def encode():
     print(f"Loading vocab from {VOCAB_PATH}...")

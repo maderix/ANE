@@ -3,8 +3,9 @@ import json
 from collections import Counter
 
 # Minimal BPE trainer for TinyStories
-RAW_TEXT_PATH = "/Users/andy.huang/lab/research/ANE/training/tinystories_raw.txt"
-VOCAB_PATH = "/Users/andy.huang/lab/research/ANE/training/vocab.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RAW_TEXT_PATH = os.path.join(BASE_DIR, "tinystories_raw.txt")
+VOCAB_PATH = os.path.join(BASE_DIR, "vocab.json")
 VOCAB_SIZE = 5000 # Reduced for speed of verification
 SUBSET_SIZE = 200000 # 200KB limit for speed
 
