@@ -142,7 +142,7 @@ def softmax(x):
     e = np.exp(x)
     return e / np.sum(e)
 
-def generate_text(W, tok, max_tokens=64, temperature=0.8):
+def generate_text(W, max_tokens=64, temperature=0.8):
     tokenizer = get_tokenizer()
     if tokenizer is None:
         return '[no tokenizer]'
@@ -244,7 +244,7 @@ def generation_thread():
                 with S.gen_lock:
                     S.gen_status = 'idle'
                 continue
-            text = generate_text(W, get_tokenizer(), max_tokens=64, temperature=0.8)
+            text = generate_text(W, max_tokens=64, temperature=0.8)
             with S.gen_lock:
                 S.gen_text = text
                 S.gen_step = S.step
@@ -672,6 +672,8 @@ def spawn_training(resume=False, steps=10000):
     return proc
 
 def spawn_powermetrics():
+    if not sys.stdin.isatty():
+        return None
     try:
         proc = subprocess.Popen(
             ['sudo', 'powermetrics', '--samplers', 'cpu_power,gpu_power,ane_power', '-i', '1000'],
@@ -851,7 +853,7 @@ def main():
                             try:
                                 W = load_weights_from_ckpt(CKPT_PATH)
                                 if W:
-                                    text = generate_text(W, get_tokenizer(), max_tokens=64, temperature=0.8)
+                                    text = generate_text(W, max_tokens=64, temperature=0.8)
                                     with S.gen_lock:
                                         S.gen_text = text
                                         S.gen_step = S.step
