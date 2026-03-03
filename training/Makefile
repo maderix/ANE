@@ -4,6 +4,7 @@ FRAMEWORKS = -framework Foundation -framework CoreML -framework IOSurface
 LDFLAGS = $(FRAMEWORKS) -ldl
 
 HEADERS_LARGE = stories_config.h stories_io.h stories_mil.h stories_cpu_ops.h
+HEADERS_OPT = $(HEADERS_LARGE) stories_cpu_ops_opt.h
 
 HEADERS_ANE = $(HEADERS_LARGE) ane_rmsnorm_bwd.h ane_classifier.h
 
@@ -15,6 +16,9 @@ train_large: train_large.m $(HEADERS_LARGE)
 
 train_large_ane: train_large_ane.m $(HEADERS_ANE)
 	$(CC) $(CFLAGS) -o $@ train_large_ane.m $(LDFLAGS) -framework Accelerate
+
+train_opt: train_opt.m $(HEADERS_OPT)
+	$(CC) $(CFLAGS) -o $@ train_opt.m $(LDFLAGS) -framework Accelerate -framework Metal -framework MetalPerformanceShaders
 
 PROBES = test_weight_reload test_perf_stats test_qos_sweep test_ane_advanced
 
@@ -42,7 +46,7 @@ tokenize:
 	python3 tokenize.py
 
 clean:
-	rm -f train train_large train_large_ane $(PROBES) test_rmsnorm_bwd test_classifier
+	rm -f train train_large train_large_ane train_opt $(PROBES) test_rmsnorm_bwd test_classifier
 
 .PHONY: clean tokenize probes
 

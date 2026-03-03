@@ -82,6 +82,12 @@ static void io_write_fp16_at(IOSurfaceRef s, int ch_off, const float *data, int 
     cvt_f32_f16((_Float16*)IOSurfaceGetBaseAddress(s) + ch_off * sp, data, channels * sp);
     IOSurfaceUnlock(s, 0, NULL);
 }
+// Read raw fp16 from IOSurface without conversion (for fp16 activation cache)
+static void io_read_raw_fp16(IOSurfaceRef s, _Float16 *data, int ch_off, int channels, int sp) {
+    IOSurfaceLock(s, kIOSurfaceLockReadOnly, NULL);
+    memcpy(data, (_Float16*)IOSurfaceGetBaseAddress(s) + ch_off * sp, channels * sp * sizeof(_Float16));
+    IOSurfaceUnlock(s, kIOSurfaceLockReadOnly, NULL);
+}
 
 // Kernel compile/eval
 static Kern *compile_kern_mil_w(NSString *mil, NSDictionary *weights, int ic_bytes, int oc_bytes) {
