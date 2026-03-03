@@ -18,7 +18,7 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 #define CKPT_PATH "ane_stories110M_ckpt.bin"
-#define MODEL_PATH "../../assets/models/stories110M.bin"
+#define MODEL_PATH_DEFAULT "stories110M.bin"
 #define DATA_PATH "tinystories_data00.bin"
 
 // ===== Pre-allocated capture buffers per layer (Phase 1) =====
@@ -346,14 +346,20 @@ int main(int argc, char *argv[]) {
         int adam_t = 0, start_step = 0;
 
         // Parse args
+        const char *model_path = MODEL_PATH_DEFAULT;
         bool do_resume = false;
         bool use_metal = false;  // default off: Metal dW contends with ANE for memory bandwidth
+        int pos = 0;
         for (int i=1; i<argc; i++) {
             if (strcmp(argv[i], "--resume") == 0) do_resume = true;
             else if (strcmp(argv[i], "--steps") == 0 && i+1<argc) total_steps = atoi(argv[++i]);
             else if (strcmp(argv[i], "--lr") == 0 && i+1<argc) lr = atof(argv[++i]);
             else if (strcmp(argv[i], "--no-metal") == 0) use_metal = false;
             else if (strcmp(argv[i], "--metal") == 0) use_metal = true;
+            else if (argv[i][0] != '-') {
+                if (pos == 0) model_path = argv[i];
+                pos++;
+            }
         }
 
         // Allocate per-layer state
@@ -415,7 +421,7 @@ int main(int argc, char *argv[]) {
             printf("dim=%d hidden=%d heads=%d seq=%d vocab=%d layers=%d\n", DIM, HIDDEN, HEADS, SEQ, VOCAB, NLAYERS);
             printf("Optimizations: NEON-Adam, vec-embed, pre-alloc, concurrent-dW, fp16-cache%s\n",
                    metal_ok ? ", Metal-GPU-dW" : "");
-            if (!load_pretrained(lw, rms_final, embed, MODEL_PATH)) {
+            if (!load_pretrained(lw, rms_final, embed, model_path)) {
                 printf("Pretrained load failed, using random init\n");
                 srand48(42);
                 float scale_d=1.0f/sqrtf(DIM), scale_h=1.0f/sqrtf(HIDDEN);
