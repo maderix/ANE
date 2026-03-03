@@ -1,0 +1,42 @@
+timestamp_utc=2026-03-03T18:34:30Z
+ProductName:		macOS
+ProductVersion:		26.3
+BuildVersion:		25D125
+Darwin Mentors-Mac-Studio.local 25.3.0 Darwin Kernel Version 25.3.0: Wed Jan 28 20:47:03 PST 2026; root:xnu-12377.81.4~5/RELEASE_ARM64_T6031 arm64
+
+=== sysctl ===
+hw.model: Mac15,14
+hw.memsize: 274877906944
+hw.ncpu: 28
+hw.physicalcpu: 28
+hw.logicalcpu: 28
+hw.perflevel0.physicalcpu: 20
+hw.perflevel1.physicalcpu: 8
+machdep.cpu.brand_string: Apple M3 Ultra
+
+=== system_profiler SPHardwareDataType ===
+Hardware:
+
+    Hardware Overview:
+
+      Model Name: Mac Studio
+      Model Identifier: Mac15,14
+      Model Number: Z1CD001HRLL/A
+      Chip: Apple M3 Ultra
+      Total Number of Cores: 28 (20 Performance and 8 Efficiency)
+      Memory: 256 GB
+      System Firmware Version: 13822.81.10
+      OS Loader Version: 13822.81.10
+      Serial Number (system): [REDACTED]
+      Hardware UUID: [REDACTED]
+      Provisioning UDID: [REDACTED]
+      Activation Lock Status: Disabled
+
+
+=== toolchain ===
+/Library/Developer/CommandLineTools
+Apple clang version 17.0.0 (clang-1700.3.19.1)
+Target: arm64-apple-darwin25.3.0
+Thread model: posix
+InstalledDir: /Library/Developer/CommandLineTools/usr/bin
+xcode-select: error: tool 'xcodebuild' requires Xcode, but active developer directory '/Library/Developer/CommandLineTools' is a command line tools instance

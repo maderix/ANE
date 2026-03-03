@@ -1,0 +1,29 @@
+xcrun clang -O2 -Wall -Wno-deprecated-declarations -fobjc-arc -o train_large train_large.m -framework Foundation -framework CoreML -framework IOSurface -ldl -framework Accelerate
+xcrun clang -O2 -Wall -Wno-deprecated-declarations -fobjc-arc -o train_large_ane train_large_ane.m -framework Foundation -framework CoreML -framework IOSurface -ldl -framework Accelerate
+train_large_ane.m:421:20: warning: variable 't_ane' set but not used [-Wunused-but-set-variable]
+  421 |             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
+      |                    ^
+train_large_ane.m:421:28: warning: variable 't_io' set but not used [-Wunused-but-set-variable]
+  421 |             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
+      |                            ^
+train_large_ane.m:421:35: warning: variable 't_elem' set but not used [-Wunused-but-set-variable]
+  421 |             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
+      |                                   ^
+train_large_ane.m:421:44: warning: variable 't_rms' set but not used [-Wunused-but-set-variable]
+  421 |             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
+      |                                            ^
+train_large_ane.m:421:52: warning: variable 't_cblas_wait' set but not used [-Wunused-but-set-variable]
+  421 |             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
+      |                                                    ^
+train_large_ane.m:421:67: warning: variable 't_cls' set but not used [-Wunused-but-set-variable]
+  421 |             double t_ane=0,t_io=0,t_elem=0,t_rms=0,t_cblas_wait=0,t_cls=0;
+      |                                                                   ^
+In file included from train_large_ane.m:15:
+./stories_cpu_ops.h:72:14: warning: unused function 'cross_entropy_loss' [-Wunused-function]
+   72 | static float cross_entropy_loss(float *dlogits, const float *logits, const uint16_t *targets, int V, int S) {
+      |              ^~~~~~~~~~~~~~~~~~
+In file included from train_large_ane.m:17:
+./ane_classifier.h:35:18: warning: unused function 'gen_classifier_bwd' [-Wunused-function]
+   35 | static NSString *gen_classifier_bwd(void) {
+      |                  ^~~~~~~~~~~~~~~~~~
+8 warnings generated.

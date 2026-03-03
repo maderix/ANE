@@ -1,0 +1,15 @@
+=== ANE SRAM Probe: 1x1 Conv with Increasing Weight Size ===
+
+Config                      W (MB)  Act(MB)  Tot(MB)    ms/eval   TFLOPS
+--------------------------------------------------------------------------
+256ch x 64sp                  0.1     0.03      0.2  FAIL(-1)
+512ch x 64sp                  0.5     0.06      0.6  FAIL(-1)
+1024ch x 64sp                 2.0     0.12      2.2  FAIL(-1)
+2048ch x 64sp                 8.0     0.25      8.5  FAIL(-1)
+3072ch x 64sp                18.0     0.38     18.8  FAIL(-1)
+4096ch x 64sp                32.0     0.50     33.0  FAIL(-1)
+5120ch x 64sp                50.0     0.62     51.2  FAIL(-1)
+6144ch x 64sp                72.0     0.75     73.5  FAIL(-1)
+8192ch x 32sp               128.0     0.50    129.0  FAIL(-1)
+
+Look for the performance cliff to estimate SRAM size.

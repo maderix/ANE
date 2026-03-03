@@ -1,0 +1,76 @@
+xcrun clang -O2 -framework Foundation -framework IOSurface -framework Accelerate -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -fobjc-arc -o train train.m
+In file included from train.m:5:
+./cpu_ops.h:74:9: warning: 'cblas_scopy' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+   74 |         cblas_scopy(V, logits + t, S, col, 1);
+      |         ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:145:6: note: 'cblas_scopy' has been explicitly marked deprecated here
+  145 | void cblas_scopy(const int __N, const float *__X, const int __incX, float *__Y,
+      |      ^
+In file included from train.m:5:
+./cpu_ops.h:89:9: warning: 'cblas_scopy' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+   89 |         cblas_scopy(V, col, 1, dlogits + t, S);
+      |         ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:145:6: note: 'cblas_scopy' has been explicitly marked deprecated here
+  145 | void cblas_scopy(const int __N, const float *__X, const int __incX, float *__Y,
+      |      ^
+train.m:503:13: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  503 |             cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+      |             ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:512:13: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  512 |             cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+      |             ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:518:17: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  518 |                 cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+      |                 ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:603:21: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  603 |                     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, DIM, HIDDEN, SEQ,
+      |                     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:605:21: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  605 |                     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, HIDDEN, DIM, SEQ,
+      |                     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:607:21: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  607 |                     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, HIDDEN, DIM, SEQ,
+      |                     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:637:21: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  637 |                     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, DIM, DIM, SEQ,
+      |                     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:678:21: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  678 |                     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, DIM, DIM, SEQ,
+      |                     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:680:21: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  680 |                     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, DIM, DIM, SEQ,
+      |                     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+train.m:682:21: warning: 'cblas_sgemm' is deprecated: first deprecated in macOS 13.3 - An updated CBLAS interface supporting ILP64 is available.  Please compile with -DACCELERATE_NEW_LAPACK to access the new headers and -DACCELERATE_LAPACK_ILP64 for ILP64 support. [-Wdeprecated-declarations]
+  682 |                     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, DIM, DIM, SEQ,
+      |                     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/cblas.h:610:6: note: 'cblas_sgemm' has been explicitly marked deprecated here
+  610 | void cblas_sgemm(const enum CBLAS_ORDER __Order,
+      |      ^
+12 warnings generated.

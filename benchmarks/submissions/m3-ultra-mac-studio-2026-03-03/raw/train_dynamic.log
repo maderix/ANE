@@ -1,0 +1,34 @@
+=== ANE Dynamic Training: Stories110M (12 layers) ===
+dim=768 hidden=2048 heads=12 seq=256 vocab=32000 layers=12
+Params: 128.4M (transformer 103.8M + embed 24.6M)
+Kernels: 9 compiled, 9 weight-bearing
+Accum 10 steps, LR=0.0001
+FLOPs/step: fwd=53150.2M bwd_dx=53150.2M bwd_dW=53150.2M sdpa_bwd=0.0M total=159450.7M
+ANE FLOPs/step: 159450.7M
+  Training from scratch (random init)
+Token data: 20658981 tokens (41.3 MB)
+Vocab compaction: 32000 → 9205 active tokens (3.5x reduction)
+Compiling 9 dynamic kernels (one-time)...
+  Compiling sdpaFwd...
+  Compiling ffnW13...
+  Compiling ffnW2...
+  Compiling ffnBwdW2t...
+  Compiling ffnBwdW13t...
+  Compiling wotBwd...
+  Compiling sdpaBwd1...
+  Compiling sdpaBwd2...
+  Compiling qkvBwd...
+Compiled 9 kernels in 353ms (shared across all 12 layers)
+
+  timing: ane_fwd=32.7 io_fwd=15.9 rms=2.4 ane_bwd=37.0 io_bwd=14.8 silu=7.6 rms_bwd=4.2 cls=14.9 cblas_wait=0.0 dw_copy=2.9
+step 0    loss=9.1455  lr=1.00e-04  136.7ms/step  x[-3.68,4.39] dy[-8.273e-05,8.298e-05]
+  grad_norm=1.7078
+  timing: ane_fwd=32.7 io_fwd=8.5 rms=1.8 ane_bwd=36.6 io_bwd=10.5 silu=6.0 rms_bwd=3.9 cls=14.3 cblas_wait=0.0 dw_copy=2.5
+step 10   loss=9.1674  lr=1.00e-05  118.1ms/step  x[-3.77,3.73] dy[-8.873e-05,8.846e-05]
+  grad_norm=1.6345
+
+=== Efficiency Report ===
+Total steps:  20
+Compile:      353ms (one-time, 12.0%)
+Train time:   2309ms (115.4ms/step)
+Wall time:    2.9s
