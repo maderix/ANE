@@ -212,8 +212,8 @@ int main(int argc, char *argv[]) {
         LayerKernels kern_A[NLAYERS], kern_B[NLAYERS];
         LayerKernels *kern_active = kern_A;   // currently running evals
         LayerKernels *kern_pending = kern_B;  // being compiled in background
-        _Atomic bool pending_ready = false;   // signal: pending compile done
-        _Atomic bool bg_compile_running = false;
+        static _Atomic bool pending_ready = false;   // signal: pending compile done
+        static _Atomic bool bg_compile_running = false;
         dispatch_queue_t compile_q = dispatch_queue_create("ane.compile.bg", DISPATCH_QUEUE_SERIAL);
         // Legacy alias for code that uses kern[L]
         #define kern kern_active
@@ -683,10 +683,11 @@ int main(int argc, char *argv[]) {
             if (!atomic_load(&bg_compile_running) &&
                 g_compile_count + TOTAL_WEIGHT_KERNELS <= MAX_COMPILES) {
                 atomic_store(&bg_compile_running, true);
-                // Capture current weight pointers for background block
+                // Capture pointers (not stack arrays) for background block
                 LayerKernels *bg_target = kern_pending;
+                LayerWeights *bg_weights = lw; // decays to pointer, safe for block
                 dispatch_async(compile_q, ^{
-                    compile_into(bg_target, lw);
+                    compile_into(bg_target, bg_weights);
                     atomic_store(&pending_ready, true);
                     atomic_store(&bg_compile_running, false);
                 });
