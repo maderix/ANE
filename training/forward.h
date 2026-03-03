@@ -9,22 +9,43 @@
 // Transpose back to [S, out_dim] row-major
 static void ane_conv_eval(ANEKernel *kernel, const float *x, float *y,
                           int S, int in_dim, int out_dim) {
-    float *x_t = (float*)malloc(S * in_dim * sizeof(float));
-    for (int t = 0; t < S; t++)
-        for (int i = 0; i < in_dim; i++)
-            x_t[i*S + t] = x[t*in_dim + i];
+    if (g_fp16_io) {
+        // fp16 I/O path: transpose + convert float→fp16, write, eval, read fp16→float + transpose
+        _Float16 *x_t = (_Float16*)malloc(S * in_dim * sizeof(_Float16));
+        for (int t = 0; t < S; t++)
+            for (int i = 0; i < in_dim; i++)
+                x_t[i*S + t] = (_Float16)x[t*in_dim + i];
 
-    ane_write_input(kernel, 0, x_t, S * in_dim * sizeof(float));
-    ane_eval(kernel);
+        ane_write_input(kernel, 0, x_t, S * in_dim * sizeof(_Float16));
+        ane_eval(kernel);
 
-    float *y_t = (float*)malloc(S * out_dim * sizeof(float));
-    ane_read_output(kernel, 0, y_t, S * out_dim * sizeof(float));
+        _Float16 *y_t = (_Float16*)malloc(S * out_dim * sizeof(_Float16));
+        ane_read_output(kernel, 0, y_t, S * out_dim * sizeof(_Float16));
 
-    for (int t = 0; t < S; t++)
-        for (int i = 0; i < out_dim; i++)
-            y[t*out_dim + i] = y_t[i*S + t];
+        for (int t = 0; t < S; t++)
+            for (int i = 0; i < out_dim; i++)
+                y[t*out_dim + i] = (float)y_t[i*S + t];
 
-    free(x_t); free(y_t);
+        free(x_t); free(y_t);
+    } else {
+        // fp32 I/O path: transpose, write, eval, read, transpose back
+        float *x_t = (float*)malloc(S * in_dim * sizeof(float));
+        for (int t = 0; t < S; t++)
+            for (int i = 0; i < in_dim; i++)
+                x_t[i*S + t] = x[t*in_dim + i];
+
+        ane_write_input(kernel, 0, x_t, S * in_dim * sizeof(float));
+        ane_eval(kernel);
+
+        float *y_t = (float*)malloc(S * out_dim * sizeof(float));
+        ane_read_output(kernel, 0, y_t, S * out_dim * sizeof(float));
+
+        for (int t = 0; t < S; t++)
+            for (int i = 0; i < out_dim; i++)
+                y[t*out_dim + i] = y_t[i*S + t];
+
+        free(x_t); free(y_t);
+    }
 }
 
 // CPU matmul fallback: y = W @ x, W[out_dim, in_dim], x[S, in_dim] → y[S, out_dim]
