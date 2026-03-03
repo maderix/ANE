@@ -16,9 +16,18 @@
 #include "ane_rmsnorm_bwd.h"
 #include "ane_classifier.h"
 
-#define CKPT_PATH "ane_stories110M_ckpt.bin"
-#define MODEL_PATH "../../assets/models/stories110M.bin"
-#define DATA_PATH "tinystories_data00.bin"
+#define DEFAULT_CKPT_PATH "ane_stories110M_ckpt.bin"
+#define DEFAULT_MODEL_PATH "../../assets/models/stories110M.bin"
+#define DEFAULT_DATA_PATH "tinystories_data00.bin"
+
+static const char *get_path(const char *env_var, const char *default_val) {
+    const char *v = getenv(env_var);
+    return (v && v[0]) ? v : default_val;
+}
+
+#define CKPT_PATH  get_path("ANE_CKPT_PATH",  DEFAULT_CKPT_PATH)
+#define MODEL_PATH get_path("ANE_MODEL_PATH", DEFAULT_MODEL_PATH)
+#define DATA_PATH  get_path("ANE_DATA_PATH",  DEFAULT_DATA_PATH)
 
 // ===== Weight loading from llama2.c format =====
 static bool load_pretrained(LayerWeights *lw, float *rms_final, float *embed, const char *path) {
@@ -196,6 +205,7 @@ int main(int argc, char *argv[]) {
     @autoreleasepool {
         setbuf(stdout, NULL);
         ane_init();
+        init_accum_steps();
         mach_timebase_info(&g_tb);
 
         int total_steps = 10000;
@@ -236,6 +246,7 @@ int main(int argc, char *argv[]) {
         if (!resuming) {
             printf("=== ANE Training: Stories110M (ANE-offloaded) ===\n");
             printf("dim=%d hidden=%d heads=%d seq=%d vocab=%d layers=%d\n", DIM, HIDDEN, HEADS, SEQ, VOCAB, NLAYERS);
+            printf("model=%s data=%s ckpt=%s\n", MODEL_PATH, DATA_PATH, CKPT_PATH);
             printf("NEW: final_rmsnorm, classifier_fwd, softmax, rmsnorm_bwd on ANE\n");
             if (!load_pretrained(lw, rms_final, embed, MODEL_PATH)) {
                 printf("Pretrained load failed, using random init\n");
@@ -263,6 +274,12 @@ int main(int argc, char *argv[]) {
         uint16_t *token_data = (uint16_t*)mmap(NULL, data_len, PROT_READ, MAP_PRIVATE, data_fd, 0);
         if (token_data == MAP_FAILED) { printf("mmap failed\n"); return 1; }
         size_t n_tokens = data_len / 2;
+        if (n_tokens <= (size_t)(SEQ + 1)) {
+            printf("Token data too short: need at least %d tokens, got %zu\n", SEQ + 2, n_tokens);
+            munmap(token_data, data_len);
+            close(data_fd);
+            return 1;
+        }
         printf("Token data: %zu tokens (%.1f MB)\n", n_tokens, data_len/1e6);
 
         // Gradient buffers
