@@ -2,6 +2,56 @@
 
 Training neural networks directly on Apple's Neural Engine (ANE) via reverse-engineered private APIs. No CoreML training APIs, no Metal, no GPU — pure ANE compute.
 
+## Project Scope & Intent
+
+I'm genuinely grateful for all the attention this project has received — I never expected a weekend research hack to blow up like this. Thank you to everyone who starred, forked, ran benchmarks on their own hardware, and shared the work. It means a lot.
+
+That said, I want to set clear expectations about what this project is and isn't.
+
+This is a **research project**, not a production framework.
+
+The goal was to demonstrate that **training on the Apple Neural Engine — and potentially other NPUs — is possible**, and that the barrier has always been software support, not hardware capability. The ANE is a remarkably capable piece of silicon that Apple restricts to inference-only use through CoreML. This project bypasses that restriction using reverse-engineered private APIs to show what's possible when you give the hardware a chance.
+
+### What this project is
+
+- A proof of concept for ANE training via `_ANEClient` and `_ANECompiler` private APIs
+- A set of benchmarks documenting real ANE performance characteristics (throughput, power, SRAM behavior)
+- A reference for anyone exploring direct ANE access outside CoreML
+- Research code that I update when I find something interesting
+
+### What this project is not
+
+- A maintained framework or library
+- A replacement for CoreML, MLX, llama.cpp, or any production inference stack
+- A path to training large models on consumer hardware (yet)
+
+### On the hype
+
+Some coverage of this project has overstated its implications. To be clear:
+
+- Training works, but utilization is low (~2-3% of peak) with significant engineering challenges remaining
+- Many element-wise operations still fall back to CPU
+- This does **not** replace GPU training for anything beyond small research models today
+
+The honest results — including all limitations — are documented in the accompanying articles:
+- [Part 1: Reverse Engineering](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine)
+- [Part 2: Benchmarks](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615)
+
+### On maintenance
+
+I don't intend to grow this into a large community project. My focus is on original research (compiler infrastructure for edge AI optimization), and maintaining an open-source framework takes time away from that.
+
+That said:
+- I'll keep pushing updates when I discover something interesting
+- Bug fixes and benchmark contributions (especially on hardware I don't own) are welcome
+- Feature requests will likely go unaddressed — but feel free to fork
+
+### Fork it, build on it
+
+This is MIT licensed for a reason. Everyone now has access to AI-assisted development tools that can adapt and extend code in hours. If this project is useful to you — take it, modify it, build something better. If you do something cool with it, I'd love to hear about it.
+
+---
+
 ## What This Is
 
 A from-scratch implementation of transformer training (forward + backward pass) running on the ANE in Apple Silicon. The ANE is a 15.8 TFLOPS (M4) inference accelerator that Apple does not expose for training. This project reverse-engineers the `_ANEClient` / `_ANECompiler` private APIs and the MIL (Model Intermediate Language) format to run custom compute graphs — including backpropagation — directly on ANE hardware.
@@ -104,8 +154,12 @@ No external dependencies. Uses only system frameworks + private ANE APIs resolve
 
 ## Disclaimer
 
-This project is independent research into Apple Neural Engine architecture. It uses undocumented APIs discovered through runtime introspection for research and educational purposes under fair use and interoperability provisions (see *Sega v. Accolade*, 1992; DMCA §1201(f)). No Apple proprietary code or binaries are included in this repository. This project is not affiliated with or endorsed by Apple Inc. Use at your own risk.
+This project uses Apple's private, undocumented APIs (`_ANEClient`, `_ANECompiler`, `_ANEInMemoryModelDescriptor`). These APIs are not covered by any public stability guarantee and may change or break with any macOS update. This is independent research into Apple Neural Engine architecture, using APIs discovered through runtime introspection for research and educational purposes under fair use and interoperability provisions (see *Sega v. Accolade*, 1992; DMCA §1201(f)). No Apple proprietary code or binaries are included in this repository. This project is not affiliated with or endorsed by Apple Inc. Use at your own risk.
 
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+---
+
+*Built by a human + Claude, one weekend at a time.*
