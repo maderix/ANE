@@ -159,6 +159,7 @@ static void save_checkpoint(const char *path, int step, int total_steps, float l
     fwrite(embed,4,VOCAB*DIM,f);
     fwrite(aembed->m,4,VOCAB*DIM,f); fwrite(aembed->v,4,VOCAB*DIM,f);
     fclose(f);
+    printf("Checkpoint saved to %s\n", path);
 }
 
 static bool load_checkpoint(const char *path, int *step, int *total_steps, float *lr, float *loss,
