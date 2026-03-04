@@ -20,15 +20,33 @@ typedef struct {
 
 static Class g_ANEDesc, g_ANEInMem, g_ANEReq, g_ANEIO;
 static bool g_ane_loaded = false;
+static id g_ane_client = nil;
+static bool g_ane_ok = false;
 
 static void ane_init(void) {
     if (g_ane_loaded) return;
-    dlopen("/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine", RTLD_NOW);
+    g_ane_loaded = true;  // Set first to prevent re-entry (ref: CRIT-01)
+    void *handle = dlopen(
+        "/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine",
+        RTLD_NOW);
+    if (!handle) {
+        fprintf(stderr, "ANE: dlopen failed: %s\n", dlerror());
+        return;
+    }
     g_ANEDesc  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
     g_ANEInMem = NSClassFromString(@"_ANEInMemoryModel");
     g_ANEReq   = NSClassFromString(@"_ANERequest");
     g_ANEIO    = NSClassFromString(@"_ANEIOSurfaceObject");
-    g_ane_loaded = true;
+    if (!g_ANEDesc || !g_ANEInMem || !g_ANEReq || !g_ANEIO) {
+        fprintf(stderr, "ANE: Private classes not found (macOS version mismatch?)\n");
+        return;
+    }
+    g_ane_ok = true;
+
+    Class clientCls = NSClassFromString(@"_ANEClient");
+    if (clientCls) {
+        g_ane_client = [clientCls performSelector:@selector(sharedConnection)];
+    }
 }
 
 static IOSurfaceRef ane_create_surface(size_t bytes) {
@@ -50,6 +68,7 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
                                int nInputs, size_t *inputSizes,
                                int nOutputs, size_t *outputSizes) {
     ane_init();
+    if (!g_ane_ok) { fprintf(stderr, "ANE: not available\n"); return NULL; }  // CRIT-01/02
     NSError *e = nil;
 
     NSDictionary *wdict = nil;
@@ -63,6 +82,7 @@ static ANEKernel *ane_compile(NSData *milText, NSData *weightData,
 
     id mdl = ((id(*)(Class,SEL,id))objc_msgSend)(
         g_ANEInMem, @selector(inMemoryModelWithDescriptor:), desc);
+    if (!mdl) { fprintf(stderr, "ANE: inMemoryModel allocation failed\n"); return NULL; }  // CRIT-02
 
     // Pre-populate temp dir with MIL + weights
     id hx = ((id(*)(id,SEL))objc_msgSend)(mdl, @selector(hexStringIdentifier));
@@ -149,6 +169,20 @@ static bool ane_eval(ANEKernel *k) {
                 e ? [[e description] UTF8String] : "unknown error");
     }
     return ok;
+}
+
+static bool ane_eval_rt(ANEKernel *k) {
+    if (!g_ane_client) return ane_eval(k);
+    NSError *e = nil;
+    BOOL ok = ((BOOL(*)(id,SEL,id,id,id,NSError**))objc_msgSend)(
+        g_ane_client, @selector(evaluateRealTimeWithModel:options:request:error:),
+        k->model, @{}, k->request, &e);
+    if (!ok) {
+        fprintf(stderr, "ANE RT eval failed, falling back to standard: %s\n",
+                e ? [[e description] UTF8String] : "unknown");
+        return ane_eval(k);
+    }
+    return true;
 }
 
 static void ane_free(ANEKernel *k) {
