@@ -22,8 +22,18 @@
 #define SEQ 256
 #define NLAYERS 12
 #define VOCAB 32000
-#define ACCUM_STEPS 10
-#define MAX_COMPILES 100
+#define ACCUM_STEPS_DEFAULT 10
+#define MAX_COMPILES_DEFAULT 100
+
+static inline int get_accum_steps(void) {
+    const char *env = getenv("ANE_ACCUM_STEPS");
+    return env ? atoi(env) : ACCUM_STEPS_DEFAULT;
+}
+
+static inline int get_max_compiles(void) {
+    const char *env = getenv("ANE_MAX_COMPILES");
+    return env ? atoi(env) : MAX_COMPILES_DEFAULT;
+}
 
 // Per compile: 5 weight-bearing kernels per layer + 1 classifier = 5*12+1 = 61
 // Plus 1 static (sdpaBwd2 per layer, no weights) = 12 more but those are weight-free
@@ -86,7 +96,7 @@ typedef struct {
 } LayerGrads;
 
 // ANE kernels per layer
-typedef struct { void *model; IOSurfaceRef ioIn, ioOut; void *request; void *tmpDir; } Kern;
+typedef struct { void *model; IOSurfaceRef ioIn, ioOut; void *request; void *tmpDir; size_t inBytes, outBytes; } Kern;
 typedef struct {
     Kern *fwdAttn, *fwdFFN, *ffnBwd, *sdpaBwd1, *sdpaBwd2, *qkvBwd;
 } LayerKernels;

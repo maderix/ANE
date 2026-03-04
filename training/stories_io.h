@@ -3,11 +3,39 @@
 #include "stories_config.h"
 #include <arm_neon.h>
 
+// IOSurface pool — reuse freed surfaces of the same size
+#define IOSURF_POOL_MAX 128
+static struct {
+    IOSurfaceRef surfaces[IOSURF_POOL_MAX];
+    size_t sizes[IOSURF_POOL_MAX];
+    int count;
+} g_iosurf_pool = { .count = 0 };
+
 static IOSurfaceRef make_surface(size_t bytes) {
+    // Check pool for matching size
+    for (int i = 0; i < g_iosurf_pool.count; i++) {
+        if (g_iosurf_pool.sizes[i] == bytes) {
+            IOSurfaceRef s = g_iosurf_pool.surfaces[i];
+            // Swap-remove
+            g_iosurf_pool.surfaces[i] = g_iosurf_pool.surfaces[--g_iosurf_pool.count];
+            g_iosurf_pool.sizes[i] = g_iosurf_pool.sizes[g_iosurf_pool.count];
+            return s;
+        }
+    }
     return IOSurfaceCreate((__bridge CFDictionaryRef)@{
         (id)kIOSurfaceWidth:@(bytes), (id)kIOSurfaceHeight:@1,
         (id)kIOSurfaceBytesPerElement:@1, (id)kIOSurfaceBytesPerRow:@(bytes),
         (id)kIOSurfaceAllocSize:@(bytes), (id)kIOSurfacePixelFormat:@0});
+}
+
+static void pool_return_surface(IOSurfaceRef s, size_t bytes) {
+    if (g_iosurf_pool.count < IOSURF_POOL_MAX) {
+        g_iosurf_pool.surfaces[g_iosurf_pool.count] = s;
+        g_iosurf_pool.sizes[g_iosurf_pool.count] = bytes;
+        g_iosurf_pool.count++;
+    } else {
+        CFRelease(s);
+    }
 }
 
 static NSData *build_blob(const float *w, int rows, int cols) {
@@ -110,6 +138,8 @@ static Kern *compile_kern_mil_w(NSString *mil, NSDictionary *weights, int ic_byt
     k->model = (void*)CFBridgingRetain(mdl);
     k->ioIn = make_surface(ic_bytes);
     k->ioOut = make_surface(oc_bytes);
+    k->inBytes = ic_bytes;
+    k->outBytes = oc_bytes;
     id wI = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), k->ioIn);
     id wO = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), k->ioOut);
     k->request = (void*)CFBridgingRetain(((id(*)(Class,SEL,id,id,id,id,id,id,id))objc_msgSend)(g_AR,
@@ -123,7 +153,8 @@ static void free_kern(Kern *k) {
     if (!k) return;
     id mdl = (__bridge id)k->model; NSError *e = nil;
     ((BOOL(*)(id,SEL,unsigned int,NSError**))objc_msgSend)(mdl, @selector(unloadWithQoS:error:), 21, &e);
-    CFRelease(k->ioIn); CFRelease(k->ioOut);
+    pool_return_surface(k->ioIn, k->inBytes);
+    pool_return_surface(k->ioOut, k->outBytes);
     [[NSFileManager defaultManager] removeItemAtPath:(__bridge id)k->tmpDir error:nil];
     CFRelease(k->model); CFRelease(k->request); CFRelease(k->tmpDir);
     free(k);
