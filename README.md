@@ -49,7 +49,7 @@ That said:
 
 ### Fork it, build on it
 
-This is MIT licensed for a reason. Everyone now has access to AI-assisted development tools that can adapt and extend code in hours. If this project is useful to you — take it, modify it, build something better. If you do something cool with it, I'd love to hear about it.If in future, community decides to maintain one source of truth repo, I'm in full support of that.
+This is MIT licensed for a reason. Everyone now has access to AI-assisted development tools that can adapt and extend code in hours. If this project is useful to you — take it, modify it, build something better. If you do something cool with it, I'd love to hear about it. If in future, community decides to maintain one source of truth repo, I'm in full support of that.
 
 ---
 
@@ -92,23 +92,48 @@ Key optimizations:
 ## File Structure
 
 ```
-├── api_exploration.m       # Initial ANE API discovery
-├── inmem_basic.m           # In-memory MIL compilation proof-of-concept
-├── inmem_bench.m           # ANE dispatch latency benchmarks
-├── inmem_peak.m            # Peak TFLOPS measurement (2048x2048 matmul)
-├── sram_bench.m            # ANE SRAM bandwidth probing
-├── sram_probe.m            # SRAM size/layout exploration
+├── api_exploration.m           # Initial ANE API discovery
+├── inmem_basic.m               # In-memory MIL compilation proof-of-concept
+├── inmem_bench.m               # ANE dispatch latency benchmarks
+├── inmem_peak.m                # Peak TFLOPS measurement (2048x2048 matmul)
+├── sram_bench.m                # ANE SRAM bandwidth probing
+├── sram_probe.m                # SRAM size/layout exploration
+├── benchmarks/
+│   ├── ANE_BENCHMARK_REPORT.md # Cross-chip benchmark report
+│   └── community_results.json  # Community-submitted benchmark data
+├── bridge/
+│   ├── Makefile
+│   ├── ane_bridge.h            # ANE bridge header
+│   └── ane_bridge.m            # ANE bridge implementation
 └── training/
-    ├── ane_runtime.h       # ANE private API wrapper (compile, eval, IOSurface)
-    ├── ane_mil_gen.h       # MIL program generation helpers
-    ├── model.h             # Model weight initialization and blob builders
-    ├── forward.h           # Forward pass MIL generators
-    ├── backward.h          # Backward pass MIL generators
-    ├── train.m             # Minimal training loop (early prototype)
-    ├── tiny_train.m        # 2-layer tiny model training
-    ├── train_large.m       # Main: single-layer dim=768 training (optimized)
-    ├── test_*.m            # Unit tests for individual kernels
-    └── Makefile
+    ├── Makefile
+    ├── README.md               # Training pipeline documentation
+    ├── ane_runtime.h           # ANE private API wrapper (compile, eval, IOSurface)
+    ├── ane_mil_gen.h           # MIL program generation helpers
+    ├── ane_classifier.h        # ANE-offloaded classifier
+    ├── ane_rmsnorm_bwd.h       # ANE RMSNorm backward pass
+    ├── model.h                 # Model weight initialization and blob builders
+    ├── forward.h               # Forward pass MIL generators
+    ├── backward.h              # Backward pass MIL generators
+    ├── stories_config.h        # Stories model configuration
+    ├── stories_cpu_ops.h       # CPU-side operations for Stories model
+    ├── stories_io.h            # Stories data I/O (TinyStories loading)
+    ├── stories_mil.h           # Stories MIL program generators
+    ├── train.m                 # Minimal training loop (early prototype)
+    ├── tiny_train.m            # 2-layer tiny model training
+    ├── train_large.m           # Main: Stories110M training (static pipeline)
+    ├── train_large_ane.m       # Stories110M training (ANE classifier)
+    ├── test_*.m                # Unit tests for individual kernels
+    ├── dashboard.py            # Live training dashboard (power, throughput)
+    ├── tokenize.py             # TinyStories pretokenization script
+    ├── download_data.sh        # Training data download script
+    └── training_dynamic/       # Dynamic pipeline (no recompilation)
+        ├── Makefile
+        ├── config.h
+        ├── cpu_ops.h
+        ├── io.h
+        ├── mil_dynamic.h
+        └── train.m
 ```
 
 ## Training Data
