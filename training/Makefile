@@ -39,13 +39,16 @@ test_ane_advanced: test_ane_advanced.m
 m5_performance_suite: m5_performance_suite.m ane_runtime.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
+m5_pipeline_suite: m5_pipeline_suite.m ane_runtime.h ane_mil_gen.h
+	$(CC) $(CFLAGS) -Wno-unused-function -Wno-gnu-folding-constant -o $@ $< $(LDFLAGS)
+
 probes: $(PROBES)
 
 tokenize:
 	python3 tokenize.py
 
 clean:
-	rm -f train train_large train_large_ane $(PROBES) test_rmsnorm_bwd test_classifier m5_performance_suite
+	rm -f train train_large train_large_ane $(PROBES) test_rmsnorm_bwd test_classifier m5_performance_suite m5_pipeline_suite
 
 .PHONY: clean tokenize probes
 
