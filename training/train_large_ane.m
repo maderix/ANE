@@ -13,6 +13,7 @@
 #include "stories_io.h"
 #include "stories_mil.h"
 #include "stories_cpu_ops.h"
+#include "data_validation.h"
 #include "ane_rmsnorm_bwd.h"
 #include "ane_classifier.h"
 
@@ -273,12 +274,41 @@ int main(int argc, char *argv[]) {
         // mmap token data
         int data_fd = open(DATA_PATH, O_RDONLY);
         if (data_fd < 0) { printf("Cannot open %s\n", DATA_PATH); return 1; }
-        struct stat st; fstat(data_fd, &st);
-        size_t data_len = st.st_size;
+        struct stat st;
+        if (fstat(data_fd, &st) != 0) { perror("fstat"); close(data_fd); return 1; }
+        size_t data_len = (size_t)st.st_size;
+        size_t n_tokens = 0, extra_bytes = 0;
+        if (!token_data_bytes_to_token_count(data_len, &n_tokens, &extra_bytes)) {
+            fprintf(stderr,
+                    "Token data validation failed: file size %zu bytes has %zu extra byte(s); expected 16-bit tokens\n",
+                    data_len, extra_bytes);
+            close(data_fd);
+            return 1;
+        }
+        if (n_tokens == 0) {
+            fprintf(stderr, "Token data validation failed: token file is empty\n");
+            close(data_fd);
+            return 1;
+        }
         uint16_t *token_data = (uint16_t*)mmap(NULL, data_len, PROT_READ, MAP_PRIVATE, data_fd, 0);
-        if (token_data == MAP_FAILED) { printf("mmap failed\n"); return 1; }
-        size_t n_tokens = data_len / 2;
+        if (token_data == MAP_FAILED) { perror("mmap"); close(data_fd); return 1; }
+        close(data_fd); // mapping remains valid; avoid fd leaks across exec() restarts
         printf("Token data: %zu tokens (%.1f MB)\n", n_tokens, data_len/1e6);
+
+        TokenDataValidationError data_err = {0};
+        TokenDataValidationCode data_code = token_data_validate(token_data, n_tokens, SEQ, VOCAB, &data_err);
+        if (data_code == TOKEN_DATA_ERR_TOO_SHORT) {
+            fprintf(stderr, "Token data validation failed: need at least %zu tokens (SEQ+1), got %zu\n",
+                    data_err.required_tokens, n_tokens);
+            munmap(token_data, data_len);
+            return 1;
+        }
+        if (data_code == TOKEN_DATA_ERR_OOB_TOKEN) {
+            fprintf(stderr, "Token data validation failed: token %u at index %zu is outside vocab [0, %d)\n",
+                    data_err.bad_token, data_err.bad_index, VOCAB);
+            munmap(token_data, data_len);
+            return 1;
+        }
 
         // Gradient buffers
         float *dy = (float*)malloc(SEQ*DIM*4);
@@ -733,7 +763,7 @@ int main(int argc, char *argv[]) {
             layer_acts_free(&acts[L]); layer_grads_free(&grads[L]);
         }
         free_kern(softmaxKern); free_kern(finalRmsKern); free_kern(classifierKern);
-        munmap(token_data, data_len); close(data_fd);
+        munmap(token_data, data_len);
         free(rms_final); free(embed); free(grms_final); free(gembed);
         adam_free(&arms_final); adam_free(&aembed);
         free(dy); free(dffn); free(dh1); free(dh3); free(dx_ffn); free(dx2);
