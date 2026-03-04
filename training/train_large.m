@@ -14,7 +14,11 @@ static bool load_pretrained(LayerWeights *lw, float *rms_final, float *embed, co
     FILE *f = fopen(path, "rb");
     if (!f) { printf("Cannot open %s\n", path); return false; }
     Llama2Config cfg;
-    fread(&cfg, sizeof(cfg), 1, f);
+    // Validate config read — gatekeeper before any dimension-based logic (CRIT-03)
+    if (fread(&cfg, sizeof(cfg), 1, f) != 1) {
+        printf("  ERROR: Config read failed (truncated file?)\n");
+        fclose(f); return false;
+    }
     printf("  Model config: dim=%d hidden=%d layers=%d heads=%d vocab=%d seq=%d\n",
            cfg.dim, cfg.hidden_dim, cfg.n_layers, cfg.n_heads, abs(cfg.vocab_size), cfg.seq_len);
     if (cfg.dim != DIM || cfg.hidden_dim != HIDDEN || cfg.n_layers != NLAYERS) {
@@ -112,6 +116,7 @@ static void save_checkpoint(const char *path, int step, int total_steps, float l
                             LayerWeights *lw, LayerAdam *la, float *rms_final, AdamState *arms_final,
                             float *embed, AdamState *aembed) {
     FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "save_checkpoint: cannot open %s\n", path); return; }  // CRIT-03
     CkptHdr h = {0};
     h.magic = 0x424C5A54; h.version = 2;
     h.step = step; h.total_steps = total_steps;
@@ -120,6 +125,7 @@ static void save_checkpoint(const char *path, int step, int total_steps, float l
     h.lr = lr; h.loss = loss;
     h.cum_compile = cc; h.cum_train = ct; h.cum_wall = cw;
     h.cum_steps = cs; h.cum_batches = cb; h.adam_t = adam_t;
+    h.pad[0] = 0x01020304;  // byte-order sentinel (MED-04): LE marker, see CkptHdr
     fwrite(&h, sizeof(h), 1, f);
     // Per-layer weights + adam
     for (int L = 0; L < NLAYERS; L++) {
@@ -152,8 +158,20 @@ static bool load_checkpoint(const char *path, int *step, int *total_steps, float
     FILE *f = fopen(path, "rb");
     if (!f) return false;
     CkptHdr h;
-    fread(&h, sizeof(h), 1, f);
+    // Validate header read before magic-byte check (CRIT-03)
+    if (fread(&h, sizeof(h), 1, f) != 1) {
+        fprintf(stderr, "load_checkpoint: header read failed\n");
+        fclose(f); return false;
+    }
     if (h.magic != 0x424C5A54 || h.version != 2) { fclose(f); return false; }
+    // MED-04: Byte-order check. pad[0]=0 = legacy checkpoint (no sentinel, accept).
+    // pad[0]=0x01020304 = LE ok. Anything else = big-endian or corrupt checkpoint.
+    _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
+        "Checkpoint format is little-endian (Apple Silicon only)");
+    if (h.pad[0] != 0 && h.pad[0] != 0x01020304) {
+        fprintf(stderr, "load_checkpoint: byte-order mismatch (big-endian checkpoint?)\n");
+        fclose(f); return false;
+    }
     *step = h.step; *total_steps = h.total_steps; *lr = h.lr; *loss = h.loss;
     *cc = h.cum_compile; *ct = h.cum_train; *cw = h.cum_wall;
     *cs = h.cum_steps; *cb = h.cum_batches; *adam_t = h.adam_t;

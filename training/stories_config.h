@@ -101,7 +101,7 @@ typedef struct {
     double cum_compile, cum_train, cum_wall;
     int cum_steps, cum_batches;
     int adam_t;
-    int pad[3];         // alignment
+    int pad[3];         // pad[0] = 0x01020304 (LE byte-order sentinel, MED-04); pad[1..2] = 0
 } CkptHdr;
 
 // llama2.c model file header
@@ -111,15 +111,33 @@ typedef struct {
 
 // Globals
 static Class g_D, g_I, g_AR, g_AIO;
+static bool g_ane_ok_large = false;    // true only when all private classes loaded successfully
 static mach_timebase_info_data_t g_tb;
 static int g_compile_count = 0;
+static int g_compile_seq = 0;  // MED-02: per-call unique index for temp-dir naming
 
 static void ane_init(void) {
-    dlopen("/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine", RTLD_NOW);
-    g_D  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
-    g_I  = NSClassFromString(@"_ANEInMemoryModel");
-    g_AR = NSClassFromString(@"_ANERequest");
-    g_AIO= NSClassFromString(@"_ANEIOSurfaceObject");
+    // MED-06: dispatch_once provides thread-safe one-time init with full memory barrier.
+    // Replaces manual g_ane_init_done bool guard which had a Check-Then-Act race.
+    static dispatch_once_t ane_once_large;
+    dispatch_once(&ane_once_large, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/AppleNeuralEngine",
+            RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "ANE: dlopen failed: %s\n", dlerror());
+            return;
+        }
+        g_D  = NSClassFromString(@"_ANEInMemoryModelDescriptor");
+        g_I  = NSClassFromString(@"_ANEInMemoryModel");
+        g_AR = NSClassFromString(@"_ANERequest");
+        g_AIO= NSClassFromString(@"_ANEIOSurfaceObject");
+        if (!g_D || !g_I || !g_AR || !g_AIO) {
+            fprintf(stderr, "ANE: Private classes not found (macOS version mismatch?)\n");
+            return;
+        }
+        g_ane_ok_large = true;  // dispatch_once guarantees memory barrier before completion
+    });
 }
 static double tb_ms(uint64_t t) { return (double)t * g_tb.numer / g_tb.denom / 1e6; }
 

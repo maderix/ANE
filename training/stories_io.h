@@ -11,31 +11,41 @@ static IOSurfaceRef make_surface(size_t bytes) {
 }
 
 static NSData *build_blob(const float *w, int rows, int cols) {
-    int ws=rows*cols*2, tot=128+ws;
+    size_t ws=(size_t)rows*cols*2, tot=128+ws;  // size_t prevents int overflow (CRIT-04)
     uint8_t *b=(uint8_t*)calloc(tot,1);
+    if (!b) { fprintf(stderr, "build_blob: calloc(%zu) failed\n", tot); return nil; }
     b[0]=1;b[4]=2;b[64]=0xEF;b[65]=0xBE;b[66]=0xAD;b[67]=0xDE;b[68]=1;
-    *(uint32_t*)(b+72)=ws;*(uint32_t*)(b+80)=128;
+    *(uint32_t*)(b+72)=(uint32_t)ws;*(uint32_t*)(b+80)=128;
     _Float16 *fp16=(_Float16*)(b+128);
-    for(int i=0;i<rows*cols;i++) fp16[i]=(_Float16)w[i];
+    for(size_t i=0;i<(size_t)rows*cols;i++) fp16[i]=(_Float16)w[i];
     return [NSData dataWithBytesNoCopy:b length:tot freeWhenDone:YES];
 }
 static NSData *build_blob_t(const float *w, int rows, int cols) {
-    int ws=cols*rows*2, tot=128+ws;
+    size_t ws=(size_t)cols*rows*2, tot=128+ws;  // size_t prevents int overflow (CRIT-04)
     uint8_t *b=(uint8_t*)calloc(tot,1);
+    if (!b) { fprintf(stderr, "build_blob_t: calloc(%zu) failed\n", tot); return nil; }
     b[0]=1;b[4]=2;b[64]=0xEF;b[65]=0xBE;b[66]=0xAD;b[67]=0xDE;b[68]=1;
-    *(uint32_t*)(b+72)=ws;*(uint32_t*)(b+80)=128;
+    *(uint32_t*)(b+72)=(uint32_t)ws;*(uint32_t*)(b+80)=128;
     _Float16 *fp16=(_Float16*)(b+128);
     for(int i=0;i<rows;i++) for(int j=0;j<cols;j++) fp16[j*rows+i]=(_Float16)w[i*cols+j];
     return [NSData dataWithBytesNoCopy:b length:tot freeWhenDone:YES];
 }
 static NSData *build_blob_fp16(_Float16 *d, int cnt) {
-    int ws=cnt*2, tot=128+ws;
+    size_t ws=(size_t)cnt*2, tot=128+ws;  // size_t prevents int overflow (CRIT-04)
     uint8_t *b=(uint8_t*)calloc(tot,1);
+    if (!b) { fprintf(stderr, "build_blob_fp16: calloc(%zu) failed\n", tot); return nil; }
     b[0]=1;b[4]=2;b[64]=0xEF;b[65]=0xBE;b[66]=0xAD;b[67]=0xDE;b[68]=1;
-    *(uint32_t*)(b+72)=ws;*(uint32_t*)(b+80)=128;
+    *(uint32_t*)(b+72)=(uint32_t)ws;*(uint32_t*)(b+80)=128;
     memcpy(b+128,d,ws);
     return [NSData dataWithBytesNoCopy:b length:tot freeWhenDone:YES];
 }
+
+// MED-05: NEON alignment guarantee.
+// IOSurface base address is page-aligned (≥4096 bytes). Offset = ch_off*SEQ*sizeof(_Float16).
+// With SEQ%8==0, all offsets are multiples of 16 bytes → aligned for vld1q_f16/vst1q_f32.
+// Additionally, ARM64 handles unaligned NEON loads in hardware (unlike ARM32).
+_Static_assert(SEQ % 8 == 0,
+    "SEQ must be multiple of 8 to guarantee 16-byte alignment for NEON (MED-05)");
 
 // NEON vectorized conversion
 static void cvt_f16_f32(float *dst, const _Float16 *src, int n) {
@@ -59,18 +69,31 @@ static void cvt_f32_f16(_Float16 *dst, const float *src, int n) {
 
 // IOSurface I/O (channel-first [C,S] layout)
 static void io_write_fp16(IOSurfaceRef s, const float *data, int channels, int sp) {
-    IOSurfaceLock(s, 0, NULL);
+    if (IOSurfaceLock(s, 0, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(write) failed — surface write skipped\n");
+        return;
+    }
     cvt_f32_f16((_Float16*)IOSurfaceGetBaseAddress(s), data, channels * sp);
     IOSurfaceUnlock(s, 0, NULL);
 }
 static void io_read_fp16(IOSurfaceRef s, float *data, int ch_off, int channels, int sp) {
-    IOSurfaceLock(s, kIOSurfaceLockReadOnly, NULL);
+    if (IOSurfaceLock(s, kIOSurfaceLockReadOnly, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(read) failed — output read skipped\n");
+        return;
+    }
     cvt_f16_f32(data, (_Float16*)IOSurfaceGetBaseAddress(s) + ch_off * sp, channels * sp);
     IOSurfaceUnlock(s, kIOSurfaceLockReadOnly, NULL);
 }
 static void io_copy(IOSurfaceRef dst, int dst_ch, IOSurfaceRef src, int src_ch, int channels, int sp) {
-    IOSurfaceLock(dst, 0, NULL);
-    IOSurfaceLock(src, kIOSurfaceLockReadOnly, NULL);
+    if (IOSurfaceLock(dst, 0, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(copy dst) failed — copy skipped\n");
+        return;
+    }
+    if (IOSurfaceLock(src, kIOSurfaceLockReadOnly, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(copy src) failed — copy skipped\n");
+        IOSurfaceUnlock(dst, 0, NULL);
+        return;
+    }
     memcpy((_Float16*)IOSurfaceGetBaseAddress(dst) + dst_ch*sp,
            (_Float16*)IOSurfaceGetBaseAddress(src) + src_ch*sp,
            channels * sp * sizeof(_Float16));
@@ -78,7 +101,10 @@ static void io_copy(IOSurfaceRef dst, int dst_ch, IOSurfaceRef src, int src_ch, 
     IOSurfaceUnlock(dst, 0, NULL);
 }
 static void io_write_fp16_at(IOSurfaceRef s, int ch_off, const float *data, int channels, int sp) {
-    IOSurfaceLock(s, 0, NULL);
+    if (IOSurfaceLock(s, 0, NULL) != kIOReturnSuccess) {  // MED-01
+        fprintf(stderr, "IOSurfaceLock(write_at) failed — surface write skipped\n");
+        return;
+    }
     cvt_f32_f16((_Float16*)IOSurfaceGetBaseAddress(s) + ch_off * sp, data, channels * sp);
     IOSurfaceUnlock(s, 0, NULL);
 }
@@ -86,12 +112,18 @@ static void io_write_fp16_at(IOSurfaceRef s, int ch_off, const float *data, int 
 // Kernel compile/eval
 static Kern *compile_kern_mil_w(NSString *mil, NSDictionary *weights, int ic_bytes, int oc_bytes) {
     @autoreleasepool {
+    if (!g_ane_ok_large) { printf("  [compile] ANE not available\n"); return NULL; }  // CRIT-01/02
     NSData *md = [mil dataUsingEncoding:NSUTF8StringEncoding];
     id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(g_D, @selector(modelWithMILText:weights:optionsPlist:), md, weights, nil);
     if (!desc) { printf("  [compile] desc=NULL\n"); return NULL; }
     id mdl = ((id(*)(Class,SEL,id))objc_msgSend)(g_I, @selector(inMemoryModelWithDescriptor:), desc);
+    if (!mdl) { printf("  [compile] mdl=NULL\n"); return NULL; }  // CRIT-02
     id hx = ((id(*)(id,SEL))objc_msgSend)(mdl, @selector(hexStringIdentifier));
-    NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:hx];
+    // MED-02: pid + atomic sequence counter make the directory unique per process and
+    // per call, preventing TOCTOU conflicts when two instances compile the same model.
+    int seq = __sync_fetch_and_add(&g_compile_seq, 1);
+    NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"ANE_%d_%d_%@", getpid(), seq, hx]];
     [[NSFileManager defaultManager] createDirectoryAtPath:[td stringByAppendingPathComponent:@"weights"] withIntermediateDirectories:YES attributes:nil error:nil];
     [md writeToFile:[td stringByAppendingPathComponent:@"model.mil"] atomically:YES];
     for (NSString *path in weights) {
