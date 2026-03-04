@@ -81,13 +81,11 @@ int main() {
         // === Approach 1: Non-causal SDPA (baseline) ===
         printf("=== Non-causal SDPA (baseline) ===\n");
         NSString *sdpa_mil = [NSString stringWithFormat:
-            @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-            "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-            "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-            "    func main<ios18>(tensor<fp16, [1, %d, %d, %d]> q, "
+            @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, %d, %d]> q, "
             "tensor<fp16, [1, %d, %d, %d]> k, tensor<fp16, [1, %d, %d, %d]> v) {\n"
             "        tensor<fp16, [1, %d, %d, %d]> att = scaled_dot_product_attention("
-            "query = q, key = k, value = v)[name = string(\"sdpa\")];\n"
+            "query = q, key = k, value = v)[name = tensor<string, []>(\"sdpa\")];\n"
             "    } -> (att);\n}\n",
             HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, HD];
         Kern kSDPA = compile_mil(sdpa_mil);
@@ -100,13 +98,11 @@ int main() {
         // scores = Q @ K^T → [1, HEADS, SEQ, SEQ]
         printf("\n=== Decomposed causal attention ===\n");
         NSString *qkt_mil = [NSString stringWithFormat:
-            @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-            "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-            "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-            "    func main<ios18>(tensor<fp16, [1, %d, %d, %d]> q, "
+            @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, %d, %d]> q, "
             "tensor<fp16, [1, %d, %d, %d]> k) {\n"
             "        tensor<fp16, [1, %d, %d, %d]> scores = matmul("
-            "x = q, y = k, transpose_y = true)[name = string(\"qkt\")];\n"
+            "x = q, y = k, transpose_y = true)[name = tensor<string, []>(\"qkt\")];\n"
             "    } -> (scores);\n}\n",
             HEADS, SEQ, HD, HEADS, SEQ, HD, HEADS, SEQ, SEQ];
         Kern kQKT = compile_mil(qkt_mil);
@@ -114,13 +110,11 @@ int main() {
 
         // Step 3: scores_softmax @ V → output [1, HEADS, SEQ, HD]
         NSString *sv_mil = [NSString stringWithFormat:
-            @"program(1.3)\n[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-            "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-            "{\"coremltools-version\", \"9.0\"}})]\n{\n"
-            "    func main<ios18>(tensor<fp16, [1, %d, %d, %d]> s, "
+            @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+            "    func main<ios16>(tensor<fp16, [1, %d, %d, %d]> s, "
             "tensor<fp16, [1, %d, %d, %d]> v) {\n"
             "        tensor<fp16, [1, %d, %d, %d]> out = matmul("
-            "x = s, y = v)[name = string(\"sv\")];\n"
+            "x = s, y = v)[name = tensor<string, []>(\"sv\")];\n"
             "    } -> (out);\n}\n",
             HEADS, SEQ, SEQ, HEADS, SEQ, HD, HEADS, SEQ, HD];
         Kern kSV = compile_mil(sv_mil);

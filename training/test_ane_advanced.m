@@ -50,6 +50,8 @@ static IOSurfaceRef make_surface(size_t bytes) {
         (id)kIOSurfaceAllocSize:@(bytes), (id)kIOSurfacePixelFormat:@0});
 }
 
+static int g_fp16_io = 0;  // M1/M2: cast op unsupported, use fp16 I/O directly
+
 int main() {
     @autoreleasepool {
         setbuf(stdout, NULL);
@@ -106,28 +108,43 @@ int main() {
         memcpy(blob+128, w, ws);
         NSData *wdata = [NSData dataWithBytesNoCopy:blob length:tot freeWhenDone:YES];
 
-        NSString *mil = [NSString stringWithFormat:
-            @"program(1.3)\n"
-            "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-            "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-            "{\"coremltools-version\", \"9.0\"}})]\n"
-            "{\n"
-            "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
-            "        string pt = const()[name=string(\"pt\"), val=string(\"valid\")];\n"
-            "        tensor<int32, [2]> st = const()[name=string(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
-            "        tensor<int32, [4]> pd = const()[name=string(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
-            "        tensor<int32, [2]> dl = const()[name=string(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
-            "        int32 gr = const()[name=string(\"gr\"), val=int32(1)];\n"
-            "        string to16 = const()[name=string(\"to16\"), val=string(\"fp16\")];\n"
-            "        tensor<fp16, [1,%d,1,%d]> x16 = cast(dtype=to16,x=x)[name=string(\"cin\")];\n"
-            "        tensor<fp16, [%d,%d,1,1]> W = const()[name=string(\"W\"), "
-            "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=string(\"@model_path/weights/weight.bin\"), offset=uint64(64)))];\n"
-            "        tensor<fp16, [1,%d,1,%d]> y16 = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x16)"
-            "[name=string(\"conv\")];\n"
-            "        string to32 = const()[name=string(\"to32\"), val=string(\"fp32\")];\n"
-            "        tensor<fp32, [1,%d,1,%d]> y = cast(dtype=to32,x=y16)[name=string(\"cout\")];\n"
-            "    } -> (y);\n"
-            "}\n", CH, SP, CH, SP, CH, CH, CH, CH, CH, SP, CH, SP];
+        NSFileManager *fm = [NSFileManager defaultManager];
+
+        retry_compile:;
+        NSString *mil;
+        if (g_fp16_io) {
+            mil = [NSString stringWithFormat:
+                @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp16, [1, %d, 1, %d]> x) {\n"
+                "        tensor<string, []> pt = const()[name=tensor<string, []>(\"pt\"), val=tensor<string, []>(\"valid\")];\n"
+                "        tensor<int32, [2]> st = const()[name=tensor<string, []>(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, [4]> pd = const()[name=tensor<string, []>(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
+                "        tensor<int32, [2]> dl = const()[name=tensor<string, []>(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, []> gr = const()[name=tensor<string, []>(\"gr\"), val=tensor<int32, []>(1)];\n"
+                "        tensor<fp16, [%d,%d,1,1]> W = const()[name=tensor<string, []>(\"W\"), "
+                "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=tensor<string, []>(\"@model_path/weights/weight.bin\"), offset=tensor<uint64, []>(64)))];\n"
+                "        tensor<fp16, [1,%d,1,%d]> y = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x)"
+                "[name=tensor<string, []>(\"conv\")];\n"
+                "    } -> (y);\n}\n", CH, SP, CH, CH, CH, CH, CH, SP];
+        } else {
+            mil = [NSString stringWithFormat:
+                @"program(1.0)\n[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+                "        tensor<string, []> pt = const()[name=tensor<string, []>(\"pt\"), val=tensor<string, []>(\"valid\")];\n"
+                "        tensor<int32, [2]> st = const()[name=tensor<string, []>(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, [4]> pd = const()[name=tensor<string, []>(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
+                "        tensor<int32, [2]> dl = const()[name=tensor<string, []>(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, []> gr = const()[name=tensor<string, []>(\"gr\"), val=tensor<int32, []>(1)];\n"
+                "        tensor<string, []> to16 = const()[name=tensor<string, []>(\"to16\"), val=tensor<string, []>(\"fp16\")];\n"
+                "        tensor<fp16, [1,%d,1,%d]> x16 = cast(dtype=to16,x=x)[name=tensor<string, []>(\"cin\")];\n"
+                "        tensor<fp16, [%d,%d,1,1]> W = const()[name=tensor<string, []>(\"W\"), "
+                "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=tensor<string, []>(\"@model_path/weights/weight.bin\"), offset=tensor<uint64, []>(64)))];\n"
+                "        tensor<fp16, [1,%d,1,%d]> y16 = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x16)"
+                "[name=tensor<string, []>(\"conv\")];\n"
+                "        tensor<string, []> to32 = const()[name=tensor<string, []>(\"to32\"), val=tensor<string, []>(\"fp32\")];\n"
+                "        tensor<fp32, [1,%d,1,%d]> y = cast(dtype=to32,x=y16)[name=tensor<string, []>(\"cout\")];\n"
+                "    } -> (y);\n}\n", CH, SP, CH, SP, CH, CH, CH, CH, CH, SP, CH, SP];
+        }
 
         NSData *md = [mil dataUsingEncoding:NSUTF8StringEncoding];
         id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(g_D, @selector(modelWithMILText:weights:optionsPlist:),
@@ -135,23 +152,33 @@ int main() {
         id mdl = ((id(*)(Class,SEL,id))objc_msgSend)(g_I, @selector(inMemoryModelWithDescriptor:), desc);
         id hx = ((id(*)(id,SEL))objc_msgSend)(mdl, @selector(hexStringIdentifier));
         NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:hx];
-        NSFileManager *fm = [NSFileManager defaultManager];
         [fm createDirectoryAtPath:[td stringByAppendingPathComponent:@"weights"]
             withIntermediateDirectories:YES attributes:nil error:nil];
         [md writeToFile:[td stringByAppendingPathComponent:@"model.mil"] atomically:YES];
         [wdata writeToFile:[td stringByAppendingPathComponent:@"weights/weight.bin"] atomically:YES];
 
         NSError *e = nil;
-        ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(compileWithQoS:options:error:), 21, @{}, &e);
+        BOOL compiled = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(compileWithQoS:options:error:), 21, @{}, &e);
+        if (!compiled && !g_fp16_io) {
+            printf("[ANE] fp32 compile failed, retrying with fp16 I/O (M1/M2 fallback)\n");
+            g_fp16_io = 1;
+            [fm removeItemAtPath:td error:nil];
+            goto retry_compile;
+        }
         ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(loadWithQoS:options:error:), 21, @{}, &e);
 
-        int ioBytes = CH * SP * 4;
+        int ioBytes = CH * SP * (g_fp16_io ? 2 : 4);
         IOSurfaceRef ioIn = make_surface(ioBytes);
         IOSurfaceRef ioOut = make_surface(ioBytes);
 
         IOSurfaceLock(ioIn, 0, NULL);
-        float *inp = (float*)IOSurfaceGetBaseAddress(ioIn);
-        for (int c = 0; c < CH; c++) for (int s = 0; s < SP; s++) inp[c*SP+s] = (float)(s+1) * 0.1f;
+        if (g_fp16_io) {
+            _Float16 *inp = (_Float16*)IOSurfaceGetBaseAddress(ioIn);
+            for (int c = 0; c < CH; c++) for (int s = 0; s < SP; s++) inp[c*SP+s] = (_Float16)((float)(s+1) * 0.1f);
+        } else {
+            float *inp = (float*)IOSurfaceGetBaseAddress(ioIn);
+            for (int c = 0; c < CH; c++) for (int s = 0; s < SP; s++) inp[c*SP+s] = (float)(s+1) * 0.1f;
+        }
         IOSurfaceUnlock(ioIn, 0, NULL);
 
         // Baseline eval
@@ -165,9 +192,16 @@ int main() {
         printf("  Baseline eval (weightsBuffer=nil, procIdx=0): %s\n", ok ? "OK" : "FAIL");
 
         IOSurfaceLock(ioOut, kIOSurfaceLockReadOnly, NULL);
-        float *out0 = (float*)IOSurfaceGetBaseAddress(ioOut);
-        float baseline_0 = out0[0], baseline_1 = out0[1];
-        printf("  Output[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", out0[0], out0[1], out0[2], out0[3]);
+        float baseline_0, baseline_1;
+        if (g_fp16_io) {
+            _Float16 *out0 = (_Float16*)IOSurfaceGetBaseAddress(ioOut);
+            baseline_0 = (float)out0[0]; baseline_1 = (float)out0[1];
+            printf("  Output[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", (float)out0[0], (float)out0[1], (float)out0[2], (float)out0[3]);
+        } else {
+            float *out0 = (float*)IOSurfaceGetBaseAddress(ioOut);
+            baseline_0 = out0[0]; baseline_1 = out0[1];
+            printf("  Output[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", out0[0], out0[1], out0[2], out0[3]);
+        }
         IOSurfaceUnlock(ioOut, kIOSurfaceLockReadOnly, NULL);
 
         // Test weightsBuffer: IOSurface with 3x identity weights
@@ -194,10 +228,18 @@ int main() {
             printf("  Eval with weightsBuffer: %s\n", ok ? "OK" : e ? [[e description] UTF8String] : "FAIL");
             if (ok) {
                 IOSurfaceLock(ioOut, kIOSurfaceLockReadOnly, NULL);
-                float *outW = (float*)IOSurfaceGetBaseAddress(ioOut);
-                printf("  Output[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", outW[0], outW[1], outW[2], outW[3]);
-                bool changed = fabsf(outW[0] - baseline_0) > 0.001f;
-                bool is_3x = fabsf(outW[0] - baseline_0 * 3.0f) < 0.1f;
+                float outW_0;
+                if (g_fp16_io) {
+                    _Float16 *outW = (_Float16*)IOSurfaceGetBaseAddress(ioOut);
+                    outW_0 = (float)outW[0];
+                    printf("  Output[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", (float)outW[0], (float)outW[1], (float)outW[2], (float)outW[3]);
+                } else {
+                    float *outW = (float*)IOSurfaceGetBaseAddress(ioOut);
+                    outW_0 = outW[0];
+                    printf("  Output[0..3]: [%.4f, %.4f, %.4f, %.4f]\n", outW[0], outW[1], outW[2], outW[3]);
+                }
+                bool changed = fabsf(outW_0 - baseline_0) > 0.001f;
+                bool is_3x = fabsf(outW_0 - baseline_0 * 3.0f) < 0.1f;
                 printf("  weightsBuffer: output %s", changed ? "CHANGED" : "unchanged");
                 if (changed) printf(" (%s)", is_3x ? "matches 3x — WORKS!" : "but not 3x as expected");
                 printf("\n");

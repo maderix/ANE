@@ -8,6 +8,8 @@
 #include <math.h>
 #include "backward.h"
 
+int g_fp16_io = 0;  // M1/M2: use fp16 I/O when cast op unsupported
+
 static mach_timebase_info_data_t g_tb;
 static double ticksToMs(uint64_t t) { return (double)t * g_tb.numer / g_tb.denom / 1e6; }
 

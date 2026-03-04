@@ -10,6 +10,8 @@
 static mach_timebase_info_data_t g_tb;
 static double tb_ms(uint64_t t) { return (double)t * g_tb.numer / g_tb.denom / 1e6; }
 
+static int g_fp16_io = 0;  // M1/M2: cast op unsupported, use fp16 I/O directly
+
 static void dump_class(const char *name) {
     Class cls = NSClassFromString([NSString stringWithUTF8String:name]);
     if (!cls) { printf("  %s: NOT FOUND\n", name); return; }
@@ -118,28 +120,43 @@ int main() {
         NSData *wdata = [NSData dataWithBytesNoCopy:blob length:tot freeWhenDone:YES];
         free(w);
 
-        NSString *mil = [NSString stringWithFormat:
-            @"program(1.3)\n"
-            "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
-            "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
-            "{\"coremltools-version\", \"9.0\"}})]\n"
-            "{\n"
-            "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
-            "        string pt = const()[name=string(\"pt\"), val=string(\"valid\")];\n"
-            "        tensor<int32, [2]> st = const()[name=string(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
-            "        tensor<int32, [4]> pd = const()[name=string(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
-            "        tensor<int32, [2]> dl = const()[name=string(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
-            "        int32 gr = const()[name=string(\"gr\"), val=int32(1)];\n"
-            "        string to16 = const()[name=string(\"to16\"), val=string(\"fp16\")];\n"
-            "        tensor<fp16, [1,%d,1,%d]> x16 = cast(dtype=to16,x=x)[name=string(\"cin\")];\n"
-            "        tensor<fp16, [%d,%d,1,1]> W = const()[name=string(\"W\"), "
-            "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=string(\"@model_path/weights/weight.bin\"), offset=uint64(64)))];\n"
-            "        tensor<fp16, [1,%d,1,%d]> y16 = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x16)"
-            "[name=string(\"conv\")];\n"
-            "        string to32 = const()[name=string(\"to32\"), val=string(\"fp32\")];\n"
-            "        tensor<fp32, [1,%d,1,%d]> y = cast(dtype=to32,x=y16)[name=string(\"cout\")];\n"
-            "    } -> (y);\n"
-            "}\n", CH, SP, CH, SP, CH, CH, CH, CH, CH, SP, CH, SP];
+        retry_compile:;
+        NSString *mil;
+        if (g_fp16_io) {
+            mil = [NSString stringWithFormat:
+                @"program(1.0)\n"
+                "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp16, [1, %d, 1, %d]> x) {\n"
+                "        tensor<string, []> pt = const()[name=tensor<string, []>(\"pt\"), val=tensor<string, []>(\"valid\")];\n"
+                "        tensor<int32, [2]> st = const()[name=tensor<string, []>(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, [4]> pd = const()[name=tensor<string, []>(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
+                "        tensor<int32, [2]> dl = const()[name=tensor<string, []>(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, []> gr = const()[name=tensor<string, []>(\"gr\"), val=tensor<int32, []>(1)];\n"
+                "        tensor<fp16, [%d,%d,1,1]> W = const()[name=tensor<string, []>(\"W\"), "
+                "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=tensor<string, []>(\"@model_path/weights/weight.bin\"), offset=tensor<uint64, []>(64)))];\n"
+                "        tensor<fp16, [1,%d,1,%d]> y = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x)"
+                "[name=tensor<string, []>(\"conv\")];\n"
+                "    } -> (y);\n}\n", CH, SP, CH, CH, CH, CH, CH, SP];
+        } else {
+            mil = [NSString stringWithFormat:
+                @"program(1.0)\n"
+                "[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{\"coremlc-version\", \"3505.4.1\"}})]\n{\n"
+                "    func main<ios16>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+                "        tensor<string, []> pt = const()[name=tensor<string, []>(\"pt\"), val=tensor<string, []>(\"valid\")];\n"
+                "        tensor<int32, [2]> st = const()[name=tensor<string, []>(\"st\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, [4]> pd = const()[name=tensor<string, []>(\"pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n"
+                "        tensor<int32, [2]> dl = const()[name=tensor<string, []>(\"dl\"), val=tensor<int32, [2]>([1,1])];\n"
+                "        tensor<int32, []> gr = const()[name=tensor<string, []>(\"gr\"), val=tensor<int32, []>(1)];\n"
+                "        tensor<string, []> to16 = const()[name=tensor<string, []>(\"to16\"), val=tensor<string, []>(\"fp16\")];\n"
+                "        tensor<fp16, [1,%d,1,%d]> x16 = cast(dtype=to16,x=x)[name=tensor<string, []>(\"cin\")];\n"
+                "        tensor<fp16, [%d,%d,1,1]> W = const()[name=tensor<string, []>(\"W\"), "
+                "val=tensor<fp16, [%d,%d,1,1]>(BLOBFILE(path=tensor<string, []>(\"@model_path/weights/weight.bin\"), offset=tensor<uint64, []>(64)))];\n"
+                "        tensor<fp16, [1,%d,1,%d]> y16 = conv(dilations=dl,groups=gr,pad=pd,pad_type=pt,strides=st,weight=W,x=x16)"
+                "[name=tensor<string, []>(\"conv\")];\n"
+                "        tensor<string, []> to32 = const()[name=tensor<string, []>(\"to32\"), val=tensor<string, []>(\"fp32\")];\n"
+                "        tensor<fp32, [1,%d,1,%d]> y = cast(dtype=to32,x=y16)[name=tensor<string, []>(\"cout\")];\n"
+                "    } -> (y);\n}\n", CH, SP, CH, SP, CH, CH, CH, CH, CH, SP, CH, SP];
+        }
 
         NSData *md = [mil dataUsingEncoding:NSUTF8StringEncoding];
         id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(g_D, @selector(modelWithMILText:weights:optionsPlist:),
@@ -153,10 +170,15 @@ int main() {
         [wdata writeToFile:[td stringByAppendingPathComponent:@"weights/weight.bin"] atomically:YES];
 
         NSError *e = nil;
-        ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(compileWithQoS:options:error:), 21, @{}, &e);
+        BOOL compiled = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(compileWithQoS:options:error:), 21, @{}, &e);
+        if (!compiled && !g_fp16_io) {
+            printf("[ANE] fp32 compile failed, retrying with fp16 I/O (M1/M2 fallback)\n");
+            g_fp16_io = 1;
+            goto retry_compile;
+        }
         ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(mdl, @selector(loadWithQoS:options:error:), 21, @{}, &e);
 
-        int ioBytes = CH * SP * 4; // fp32
+        int ioBytes = CH * SP * (g_fp16_io ? 2 : 4);
         IOSurfaceRef ioIn = make_surface(ioBytes);
         IOSurfaceRef ioOut = make_surface(ioBytes);
         id wI = ((id(*)(Class,SEL,IOSurfaceRef))objc_msgSend)(g_AIO, @selector(objectWithIOSurface:), ioIn);
@@ -174,8 +196,13 @@ int main() {
 
             if (req) {
                 IOSurfaceLock(ioIn, 0, NULL);
-                float *inp = (float*)IOSurfaceGetBaseAddress(ioIn);
-                for (int i = 0; i < CH*SP; i++) inp[i] = 1.0f;
+                if (g_fp16_io) {
+                    _Float16 *inp = (_Float16*)IOSurfaceGetBaseAddress(ioIn);
+                    for (int i = 0; i < CH*SP; i++) inp[i] = (_Float16)1.0f;
+                } else {
+                    float *inp = (float*)IOSurfaceGetBaseAddress(ioIn);
+                    for (int i = 0; i < CH*SP; i++) inp[i] = 1.0f;
+                }
                 IOSurfaceUnlock(ioIn, 0, NULL);
 
                 BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,id,NSError**))objc_msgSend)(
