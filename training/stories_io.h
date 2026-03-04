@@ -11,28 +11,31 @@ static IOSurfaceRef make_surface(size_t bytes) {
 }
 
 static NSData *build_blob(const float *w, int rows, int cols) {
-    int ws=rows*cols*2, tot=128+ws;
+    size_t ws=(size_t)rows*cols*2, tot=128+ws;  // size_t prevents int overflow (CRIT-04)
     uint8_t *b=(uint8_t*)calloc(tot,1);
+    if (!b) { fprintf(stderr, "build_blob: calloc(%zu) failed\n", tot); return nil; }
     b[0]=1;b[4]=2;b[64]=0xEF;b[65]=0xBE;b[66]=0xAD;b[67]=0xDE;b[68]=1;
-    *(uint32_t*)(b+72)=ws;*(uint32_t*)(b+80)=128;
+    *(uint32_t*)(b+72)=(uint32_t)ws;*(uint32_t*)(b+80)=128;
     _Float16 *fp16=(_Float16*)(b+128);
-    for(int i=0;i<rows*cols;i++) fp16[i]=(_Float16)w[i];
+    for(size_t i=0;i<(size_t)rows*cols;i++) fp16[i]=(_Float16)w[i];
     return [NSData dataWithBytesNoCopy:b length:tot freeWhenDone:YES];
 }
 static NSData *build_blob_t(const float *w, int rows, int cols) {
-    int ws=cols*rows*2, tot=128+ws;
+    size_t ws=(size_t)cols*rows*2, tot=128+ws;  // size_t prevents int overflow (CRIT-04)
     uint8_t *b=(uint8_t*)calloc(tot,1);
+    if (!b) { fprintf(stderr, "build_blob_t: calloc(%zu) failed\n", tot); return nil; }
     b[0]=1;b[4]=2;b[64]=0xEF;b[65]=0xBE;b[66]=0xAD;b[67]=0xDE;b[68]=1;
-    *(uint32_t*)(b+72)=ws;*(uint32_t*)(b+80)=128;
+    *(uint32_t*)(b+72)=(uint32_t)ws;*(uint32_t*)(b+80)=128;
     _Float16 *fp16=(_Float16*)(b+128);
     for(int i=0;i<rows;i++) for(int j=0;j<cols;j++) fp16[j*rows+i]=(_Float16)w[i*cols+j];
     return [NSData dataWithBytesNoCopy:b length:tot freeWhenDone:YES];
 }
 static NSData *build_blob_fp16(_Float16 *d, int cnt) {
-    int ws=cnt*2, tot=128+ws;
+    size_t ws=(size_t)cnt*2, tot=128+ws;  // size_t prevents int overflow (CRIT-04)
     uint8_t *b=(uint8_t*)calloc(tot,1);
+    if (!b) { fprintf(stderr, "build_blob_fp16: calloc(%zu) failed\n", tot); return nil; }
     b[0]=1;b[4]=2;b[64]=0xEF;b[65]=0xBE;b[66]=0xAD;b[67]=0xDE;b[68]=1;
-    *(uint32_t*)(b+72)=ws;*(uint32_t*)(b+80)=128;
+    *(uint32_t*)(b+72)=(uint32_t)ws;*(uint32_t*)(b+80)=128;
     memcpy(b+128,d,ws);
     return [NSData dataWithBytesNoCopy:b length:tot freeWhenDone:YES];
 }
@@ -86,10 +89,12 @@ static void io_write_fp16_at(IOSurfaceRef s, int ch_off, const float *data, int 
 // Kernel compile/eval
 static Kern *compile_kern_mil_w(NSString *mil, NSDictionary *weights, int ic_bytes, int oc_bytes) {
     @autoreleasepool {
+    if (!g_ane_ok_large) { printf("  [compile] ANE not available\n"); return NULL; }  // CRIT-01/02
     NSData *md = [mil dataUsingEncoding:NSUTF8StringEncoding];
     id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(g_D, @selector(modelWithMILText:weights:optionsPlist:), md, weights, nil);
     if (!desc) { printf("  [compile] desc=NULL\n"); return NULL; }
     id mdl = ((id(*)(Class,SEL,id))objc_msgSend)(g_I, @selector(inMemoryModelWithDescriptor:), desc);
+    if (!mdl) { printf("  [compile] mdl=NULL\n"); return NULL; }  // CRIT-02
     id hx = ((id(*)(id,SEL))objc_msgSend)(mdl, @selector(hexStringIdentifier));
     NSString *td = [NSTemporaryDirectory() stringByAppendingPathComponent:hx];
     [[NSFileManager defaultManager] createDirectoryAtPath:[td stringByAppendingPathComponent:@"weights"] withIntermediateDirectories:YES attributes:nil error:nil];
