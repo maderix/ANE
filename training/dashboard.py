@@ -23,7 +23,7 @@ HD = DIM // HEADS
 CKPT_PATH_STATIC = 'ane_stories110M_ckpt.bin'
 CKPT_PATH_DYNAMIC = 'training_dynamic/ane_stories110M_dyn_ckpt.bin'
 CKPT_PATH = CKPT_PATH_STATIC  # set in main() based on --dynamic
-TOKENIZER_PATH = str(Path(__file__).resolve().parent.parent.parent / 'assets' / 'models' / 'tokenizer.bin')
+TOKENIZER_PATH = str(Path(__file__).resolve().parent.parent / 'assets' / 'models' / 'tokenizer.bin')
 
 
 class State:
