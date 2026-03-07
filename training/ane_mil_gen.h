@@ -1,9 +1,17 @@
 // ane_mil_gen.h — Generate MIL text for conv-based linear ops + weight blobs
+// Runtime chip detection: Uses appropriate MIL version based on chip type
 #pragma once
 #import <Foundation/Foundation.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+
+// Import chip detection helpers from ane_runtime.h
+#ifndef ANE_RUNTIME_INCLUDED
+// Forward declarations if ane_runtime.h is not included
+extern const char *ane_get_mil_version(void);
+extern const char *ane_get_mil_ios_target(void);
+#endif
 
 // Build an FP16 weight blob with the required header structure.
 // weights_f32: source weights in row-major [out_ch, in_ch]
@@ -25,18 +33,33 @@ static NSData *mil_build_weight_blob(const float *weights_f32, int out_ch, int i
     return [NSData dataWithBytesNoCopy:buf length:total freeWhenDone:YES];
 }
 
+// Build raw FP16 weights without header (for dynamic weight injection via IOSurface)
+// weights_f32: source weights in row-major [out_ch, in_ch]
+// Returns NSData with just FP16 values, no headers
+static NSData *mil_build_raw_weights_fp16(const float *weights_f32, int out_ch, int in_ch) {
+    NSUInteger weightSize = (NSUInteger)out_ch * in_ch * sizeof(_Float16);
+    uint8_t *buf = (uint8_t*)malloc(weightSize);
+    _Float16 *fp16 = (_Float16*)buf;
+    for (NSUInteger i = 0; i < (NSUInteger)out_ch * in_ch; i++)
+        fp16[i] = (_Float16)weights_f32[i];
+    return [NSData dataWithBytesNoCopy:buf length:weightSize freeWhenDone:YES];
+}
+
 // Generate MIL for a single matmul: y = W @ x (using matmul op, weights as input)
 // Input x: [1, in_ch, spatial] fp32
 // Input W: [1, out_ch, in_ch] fp32
 // Output:  [1, out_ch, spatial] fp32
+// Uses runtime-detected MIL version
 static NSString *mil_gen_matmul(int in_ch, int out_ch, int spatial) {
+    const char *mil_ver = ane_get_mil_version();
+    const char *ios_target = ane_get_mil_ios_target();
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
+        @"program(%s)\n"
         "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
         "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
         "{\"coremltools-version\", \"9.0\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, %d]> x, tensor<fp32, [1, %d, %d]> W) {\n"
+        "    func main<%s>(tensor<fp32, [1, %d, %d]> x, tensor<fp32, [1, %d, %d]> W) {\n"
         "        string to_fp16 = const()[name = string(\"to_fp16\"), val = string(\"fp16\")];\n"
         "        tensor<fp16, [1, %d, %d]> x16 = cast(dtype = to_fp16, x = x)[name = string(\"cast_x\")];\n"
         "        tensor<fp16, [1, %d, %d]> W16 = cast(dtype = to_fp16, x = W)[name = string(\"cast_W\")];\n"
@@ -47,20 +70,55 @@ static NSString *mil_gen_matmul(int in_ch, int out_ch, int spatial) {
         "        tensor<fp32, [1, %d, %d]> y = cast(dtype = to_fp32, x = y16)[name = string(\"cast_out\")];\n"
         "    } -> (y);\n"
         "}\n",
+        mil_ver, ios_target,
         in_ch, spatial, out_ch, in_ch,
         in_ch, spatial, out_ch, in_ch,
         out_ch, spatial, out_ch, spatial];
 }
 
-// Keep the baked-weight version for reference (used in inference-only scenarios)
-static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
+// Generate MIL for dynamic matmul with weights as input tensor.
+// This is the preferred approach for dynamic weight injection on ANE.
+// Input 0: tensor<fp32, [1, 1, SEQ, IC]> activations (transposed for matmul)
+// Input 1: tensor<fp32, [1, 1, IC, OC]> weights (dynamic)
+// Output:  tensor<fp32, [1, 1, SEQ, OC]>
+// Uses runtime-detected MIL version
+static NSString *mil_gen_dynamic_matmul(int ic, int oc, int seq) {
+    // Explicitly lock to 1.3 and ios17 to bypass MIL 1.5 compiler strictness for dynamic weights
     return [NSString stringWithFormat:
         @"program(1.3)\n"
         "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
         "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
         "{\"coremltools-version\", \"9.0\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "    func main<ios17>(tensor<fp32, [1, 1, %d, %d]> x, tensor<fp32, [1, 1, %d, %d]> weights) {\n"
+        "        string to_fp16 = const()[name = string(\"to_fp16\"), val = string(\"fp16\")];\n"
+        "        tensor<fp16, [1, 1, %d, %d]> x16 = cast(dtype = to_fp16, x = x)[name = string(\"cast_x\")];\n"
+        "        tensor<fp16, [1, 1, %d, %d]> w16 = cast(dtype = to_fp16, x = weights)[name = string(\"cast_w\")];\n"
+        "        bool tx = const()[name = string(\"tx\"), val = bool(false)];\n"
+        "        bool ty = const()[name = string(\"ty\"), val = bool(false)];\n"
+        "        tensor<fp16, [1, 1, %d, %d]> y16 = matmul(transpose_x = tx, transpose_y = ty, x = x16, y = w16)[name = string(\"matmul\")];\n"
+        "        string to_fp32 = const()[name = string(\"to_fp32\"), val = string(\"fp32\")];\n"
+        "        tensor<fp32, [1, 1, %d, %d]> y = cast(dtype = to_fp32, x = y16)[name = string(\"cast_out\")];\n"
+        "    } -> (y);\n"
+        "}\n",
+        mil_ver,
+        seq, ic, ic, oc,
+        seq, ic, ic, oc,
+        seq, oc, seq, oc];
+}
+
+// Keep the baked-weight version for reference (used in inference-only scenarios)
+// Uses runtime-detected MIL version
+static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
+    const char *mil_ver = ane_get_mil_version();
+    const char *ios_target = ane_get_mil_ios_target();
+    return [NSString stringWithFormat:
+        @"program(%s)\n"
+        "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
+        "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
+        "{\"coremltools-version\", \"9.0\"}})]\n"
+        "{\n"
+        "    func main<%s>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
         "        string c_pad_type = const()[name = string(\"c_pad_type\"), val = string(\"valid\")];\n"
         "        tensor<int32, [2]> c_strides = const()[name = string(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
         "        tensor<int32, [4]> c_pad = const()[name = string(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
@@ -76,6 +134,7 @@ static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
         "        tensor<fp32, [1, %d, 1, %d]> y = cast(dtype = to_fp32, x = y16)[name = string(\"cast_out\")];\n"
         "    } -> (y);\n"
         "}\n",
+        mil_ver, ios_target,
         in_ch, spatial, in_ch, spatial,
         out_ch, in_ch, out_ch, in_ch,
         out_ch, spatial, out_ch, spatial];
@@ -86,15 +145,18 @@ static NSString *mil_gen_conv(int in_ch, int out_ch, int spatial) {
 // Outputs: Q[1, dim, 1, S], K[1, dim, 1, S], V[1, dim, 1, S]
 // Weight blob layout: Wq[dim,dim] @ offset 64, Wk @ offset 64+cs, Wv @ offset 64+2*cs
 // where cs = 64 + dim*dim*2
+// Uses runtime-detected MIL version
 static NSString *mil_gen_qkv(int dim, int spatial) {
     NSUInteger cs = 64 + (NSUInteger)dim * dim * 2;
+    const char *mil_ver = ane_get_mil_version();
+    const char *ios_target = ane_get_mil_ios_target();
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
+        @"program(%s)\n"
         "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
         "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
         "{\"coremltools-version\", \"9.0\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "    func main<%s>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
         "        string c_pad_type = const()[name = string(\"c_pad_type\"), val = string(\"valid\")];\n"
         "        tensor<int32, [2]> c_strides = const()[name = string(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
         "        tensor<int32, [4]> c_pad = const()[name = string(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
@@ -120,6 +182,7 @@ static NSString *mil_gen_qkv(int dim, int spatial) {
         "        tensor<fp32, [1, %d, 1, %d]> v = cast(dtype = to_fp32, x = v16)[name = string(\"cast_v\")];\n"
         "    } -> (q, k, v);\n"
         "}\n",
+        mil_ver, ios_target,
         dim, spatial, dim, spatial,
         dim, dim, dim, dim,
         dim, dim, dim, dim, (unsigned long)(64 + cs),
@@ -171,15 +234,18 @@ static NSData *mil_build_ffn_up_weight_blob(const float *w1, const float *w3, in
 }
 
 // Generate MIL for fused FFN up: w1 + w3 parallel convs
+// Uses runtime-detected MIL version
 static NSString *mil_gen_ffn_up(int dim, int hidden_dim, int spatial) {
     NSUInteger cs = 64 + (NSUInteger)hidden_dim * dim * 2;
+    const char *mil_ver = ane_get_mil_version();
+    const char *ios_target = ane_get_mil_ios_target();
     return [NSString stringWithFormat:
-        @"program(1.3)\n"
+        @"program(%s)\n"
         "[buildInfo = dict<string, string>({{\"coremlc-component-MIL\", \"3510.2.1\"}, "
         "{\"coremlc-version\", \"3505.4.1\"}, {\"coremltools-component-milinternal\", \"\"}, "
         "{\"coremltools-version\", \"9.0\"}})]\n"
         "{\n"
-        "    func main<ios18>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
+        "    func main<%s>(tensor<fp32, [1, %d, 1, %d]> x) {\n"
         "        string c_pad_type = const()[name = string(\"c_pad_type\"), val = string(\"valid\")];\n"
         "        tensor<int32, [2]> c_strides = const()[name = string(\"c_strides\"), val = tensor<int32, [2]>([1, 1])];\n"
         "        tensor<int32, [4]> c_pad = const()[name = string(\"c_pad\"), val = tensor<int32, [4]>([0, 0, 0, 0])];\n"
@@ -200,6 +266,7 @@ static NSString *mil_gen_ffn_up(int dim, int hidden_dim, int spatial) {
         "        tensor<fp32, [1, %d, 1, %d]> out3 = cast(dtype = to_fp32, x = h3)[name = string(\"cast_h3\")];\n"
         "    } -> (out1, out3);\n"
         "}\n",
+        mil_ver, ios_target,
         dim, spatial, dim, spatial,
         hidden_dim, dim, hidden_dim, dim,
         hidden_dim, dim, hidden_dim, dim, (unsigned long)(64 + cs),
