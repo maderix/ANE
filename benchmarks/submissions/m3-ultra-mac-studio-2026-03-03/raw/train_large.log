@@ -1,0 +1,56 @@
+=== ANE Training: Stories110M (12 layers) ===
+dim=768 hidden=2048 heads=12 seq=256 vocab=32000 layers=12
+Cannot open stories110M.bin
+Pretrained load failed, using random init
+Params: 109.53M (transformer 84.95M + embed 24.58M)
+Kernels: 72 (60 weight-bearing + 12 static sdpaBwd2)
+Accum 10 steps per recompile | Adam LR=1.0e-04 b1=0.9 b2=0.999
+FLOPs/step: fwd=43487M bwd_dx=43487M bwd_dW=43487M sdpa_bwd=6040M total=174248M
+ANE FLOPs/step: 93013M (fwd+bwd_dx+sdpa_bwd) | CPU: dW+cls (cblas)
+
+Token data: 20658981 tokens (41.3 MB)
+  Compiling layer 1/12... (12 compiles)  Compiling layer 2/12... (17 compiles)  Compiling layer 3/12... (22 compiles)  Compiling layer 4/12... (27 compiles)  Compiling layer 5/12... (32 compiles)  Compiling layer 6/12... (37 compiles)  Compiling layer 7/12... (42 compiles)  Compiling layer 8/12... (47 compiles)  Compiling layer 9/12... (52 compiles)  Compiling layer 10/12... (57 compiles)  Compiling layer 11/12... (62 compiles)  Compiling layer 12/12... (67 compiles)  Compiled 60 kernels in 3861ms                    
+step 0    loss=10.3907
+{"type":"step","step":0,"loss":10.390698,"t_ane":28.645,"t_io":11.595,"t_cls":4.599,"t_elem":16.137,"t_rms":0.093,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":1,"loss":10.434500,"t_ane":26.513,"t_io":8.729,"t_cls":4.871,"t_elem":16.067,"t_rms":0.099,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":2,"loss":10.484736,"t_ane":22.678,"t_io":6.668,"t_cls":4.782,"t_elem":15.222,"t_rms":0.088,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":3,"loss":10.417551,"t_ane":20.275,"t_io":5.646,"t_cls":4.768,"t_elem":14.809,"t_rms":0.082,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":4,"loss":10.392599,"t_ane":18.839,"t_io":5.022,"t_cls":4.764,"t_elem":14.552,"t_rms":0.078,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":5,"loss":10.392069,"t_ane":17.838,"t_io":4.597,"t_cls":4.756,"t_elem":14.362,"t_rms":0.076,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":6,"loss":10.382063,"t_ane":17.117,"t_io":4.288,"t_cls":4.744,"t_elem":14.231,"t_rms":0.074,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":7,"loss":10.377501,"t_ane":16.575,"t_io":4.070,"t_cls":4.480,"t_elem":14.141,"t_rms":0.073,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":8,"loss":10.409813,"t_ane":16.187,"t_io":3.904,"t_cls":4.495,"t_elem":14.066,"t_rms":0.072,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":9,"loss":10.395181,"t_ane":15.853,"t_io":3.774,"t_cls":4.512,"t_elem":14.004,"t_rms":0.071,"t_cblas_wait":0.001,"compiles":72}
+  [batch 10: compile=3861ms train=842.6ms (84.3ms/step) compiles=72]
+    ane=15.9 io=3.8 cls=4.5 elem=14.0 rms=0.1 cblas_wait=0.0 ms/step
+{"type":"batch","batch":10,"compile_ms":3861.1,"train_ms":842.6,"ms_per_step":84.3}
+{"type":"perf","ane_tflops":1.104,"ane_util_pct":6.99}
+[exec() restart step 10, 72 compiles, loss=10.3952]
+[RESUMED step 10, loss=10.3952]
+Token data: 20658981 tokens (41.3 MB)
+  Compiling layer 1/12... (12 compiles)  Compiling layer 2/12... (17 compiles)  Compiling layer 3/12... (22 compiles)  Compiling layer 4/12... (27 compiles)  Compiling layer 5/12... (32 compiles)  Compiling layer 6/12... (37 compiles)  Compiling layer 7/12... (42 compiles)  Compiling layer 8/12... (47 compiles)  Compiling layer 9/12... (52 compiles)  Compiling layer 10/12... (57 compiles)  Compiling layer 11/12... (62 compiles)  Compiling layer 12/12... (67 compiles)  Compiled 60 kernels in 3684ms                    
+step 10   loss=10.2671
+{"type":"step","step":10,"loss":10.267123,"t_ane":22.229,"t_io":10.639,"t_cls":4.002,"t_elem":15.738,"t_rms":0.093,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":11,"loss":10.389436,"t_ane":17.610,"t_io":6.567,"t_cls":3.323,"t_elem":14.603,"t_rms":0.077,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":12,"loss":10.246490,"t_ane":16.072,"t_io":5.196,"t_cls":4.448,"t_elem":14.103,"t_rms":0.073,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":13,"loss":10.322395,"t_ane":15.327,"t_io":4.520,"t_cls":3.993,"t_elem":13.800,"t_rms":0.071,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":14,"loss":10.280519,"t_ane":14.850,"t_io":4.144,"t_cls":4.104,"t_elem":13.659,"t_rms":0.069,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":15,"loss":10.202168,"t_ane":14.569,"t_io":3.880,"t_cls":3.861,"t_elem":13.507,"t_rms":0.068,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":16,"loss":10.306752,"t_ane":14.335,"t_io":3.695,"t_cls":3.967,"t_elem":13.473,"t_rms":0.067,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":17,"loss":10.293774,"t_ane":14.154,"t_io":3.558,"t_cls":4.041,"t_elem":13.438,"t_rms":0.067,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":18,"loss":10.263789,"t_ane":13.993,"t_io":3.445,"t_cls":4.106,"t_elem":13.359,"t_rms":0.066,"t_cblas_wait":0.001,"compiles":72}
+{"type":"step","step":19,"loss":10.307909,"t_ane":13.899,"t_io":3.353,"t_cls":4.153,"t_elem":13.339,"t_rms":0.065,"t_cblas_wait":0.001,"compiles":72}
+  [batch 10: compile=3684ms train=780.5ms (78.1ms/step) compiles=72]
+    ane=13.9 io=3.4 cls=4.2 elem=13.3 rms=0.1 cblas_wait=0.0 ms/step
+{"type":"batch","batch":10,"compile_ms":3684.2,"train_ms":780.5,"ms_per_step":78.1}
+{"type":"perf","ane_tflops":1.192,"ane_util_pct":7.54}
+
+=== Efficiency Report ===
+Total steps:     20
+Wall time:       9471 ms (9.5 s)
+Compile time:    7545 ms (79.7%)
+Train time:      1623 ms (17.1%)
+Avg train:       81.2 ms/step
+ANE TFLOPS:      1.15 sustained
+Total TFLOPS:    2.15 (ANE+CPU)
+ANE utilization: 7.3% of 15.8 TFLOPS

@@ -1,0 +1,101 @@
+{
+  "submission_id": "m3-ultra-mac-studio-2026-03-03",
+  "captured_at_utc": "2026-03-03T18:34:30Z",
+  "upstream_commit": "443194bca4491fae4400bae9dad2a0470692bdbf",
+  "system": {
+    "model_name": "Mac Studio",
+    "model_identifier": "Mac15,14",
+    "chip": "Apple M3 Ultra",
+    "memory_bytes": 274877906944,
+    "cpu_cores_total": 28,
+    "cpu_cores_performance": 20,
+    "cpu_cores_efficiency": 8,
+    "os_product_version": "26.3",
+    "os_build_version": "25D125"
+  },
+  "toolchain": {
+    "developer_dir": "/Library/Developer/CommandLineTools",
+    "clang": "Apple clang version 17.0.0 (clang-1700.3.19.1)"
+  },
+  "training": {
+    "steps": 20,
+    "train_large": {
+      "wall_time_ms": 9471,
+      "compile_time_ms": 7545,
+      "compile_pct": 79.7,
+      "train_time_ms": 1623,
+      "train_pct": 17.1,
+      "avg_train_ms_per_step": 81.2,
+      "ane_tflops": 1.15,
+      "total_tflops": 2.15,
+      "ane_utilization_pct_of_15_8_tflops": 7.3
+    },
+    "train_large_ane": {
+      "wall_time_ms": 10898,
+      "compile_time_ms": 9090,
+      "compile_pct": 83.4,
+      "train_time_ms": 1428,
+      "train_pct": 13.1,
+      "avg_train_ms_per_step": 71.4,
+      "ane_tflops": 1.48,
+      "total_tflops": 2.44,
+      "ane_utilization_pct_of_15_8_tflops": 9.4
+    },
+    "train_large_ane_no_extras": {
+      "wall_time_ms": 10248,
+      "compile_time_ms": 7455,
+      "compile_pct": 72.7,
+      "train_time_ms": 2476,
+      "train_pct": 24.2,
+      "avg_train_ms_per_step": 123.8,
+      "ane_tflops": 0.85,
+      "total_tflops": 1.41,
+      "ane_utilization_pct_of_15_8_tflops": 5.4
+    },
+    "train_dynamic_scratch": {
+      "compile_time_ms": 353,
+      "compile_pct_one_time": 12.0,
+      "train_time_ms": 2309,
+      "avg_train_ms_per_step": 115.4,
+      "wall_time_s": 2.9
+    }
+  },
+  "inmem_peak": {
+    "best_tflops": 8.08,
+    "best_config": "128x conv 512ch sp64",
+    "rows": [
+      { "config": "32x conv 512ch sp64", "weight_mb": 16.0, "gflop": 1.07, "ms_per_eval": 0.497, "tflops": 2.16 },
+      { "config": "48x conv 512ch sp64", "weight_mb": 24.0, "gflop": 1.61, "ms_per_eval": 0.535, "tflops": 3.01 },
+      { "config": "64x conv 512ch sp64", "weight_mb": 32.0, "gflop": 2.15, "ms_per_eval": 0.355, "tflops": 6.06 },
+      { "config": "96x conv 512ch sp64", "weight_mb": 48.0, "gflop": 3.22, "ms_per_eval": 0.423, "tflops": 7.61 },
+      { "config": "128x conv 512ch sp64", "weight_mb": 64.0, "gflop": 4.29, "ms_per_eval": 0.531, "tflops": 8.08 },
+      { "config": "64x conv 256ch sp64", "weight_mb": 8.0, "gflop": 0.54, "ms_per_eval": 0.287, "tflops": 1.87 },
+      { "config": "128x conv 256ch sp64", "weight_mb": 16.0, "gflop": 1.07, "ms_per_eval": 0.272, "tflops": 3.94 },
+      { "config": "256x conv 256ch sp64", "weight_mb": 32.0, "gflop": 2.15, "ms_per_eval": 0.439, "tflops": 4.89 },
+      { "config": "64x conv 384ch sp64", "weight_mb": 18.0, "gflop": 1.21, "ms_per_eval": 0.319, "tflops": 3.78 },
+      { "config": "128x conv 384ch sp64", "weight_mb": 36.0, "gflop": 2.42, "ms_per_eval": 0.369, "tflops": 6.55 }
+    ]
+  },
+  "inmem_bench": {
+    "status": "failed",
+    "failure": "all rows returned FAIL(-1)"
+  },
+  "sram_bench": {
+    "status": "failed",
+    "failure": "all rows returned FAIL(-1)"
+  },
+  "raw_files": [
+    "raw/system_info.txt",
+    "raw/upstream_commit.txt",
+    "raw/download_data.log",
+    "raw/training_make.log",
+    "raw/training_dynamic_make.log",
+    "raw/inmem_peak.log",
+    "raw/inmem_bench.log",
+    "raw/sram_bench.log",
+    "raw/train_large.log",
+    "raw/train_large_ane.log",
+    "raw/train_large_ane_no_extras.log",
+    "raw/train_dynamic.log"
+  ]
+}

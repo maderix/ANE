@@ -1,0 +1,25 @@
+=== ANE Training: Stories110M (ANE-offloaded) ===
+dim=768 hidden=2048 heads=12 seq=256 vocab=32000 layers=12
+ANE extras DISABLED (classifier/softmax/rmsnorm_bwd on CPU)
+Cannot open stories110M.bin
+Pretrained load failed, using random init
+Token data: 20658981 tokens (41.3 MB)
+  Compiling layer 1/12... (12 compiles)  Compiling layer 2/12... (17 compiles)  Compiling layer 3/12... (22 compiles)  Compiling layer 4/12... (27 compiles)  Compiling layer 5/12... (32 compiles)  Compiling layer 6/12... (37 compiles)  Compiling layer 7/12... (42 compiles)  Compiling layer 8/12... (47 compiles)  Compiling layer 9/12... (52 compiles)  Compiling layer 10/12... (57 compiles)  Compiling layer 11/12... (62 compiles)  Compiling layer 12/12... (67 compiles)  Compiled 60 kernels in 3682ms                    
+step 0    loss=10.3907
+  [batch 10: compile=3682ms train=1249.6ms (125.0ms/step) compiles=72]
+[exec() restart step 10, 72 compiles, loss=10.3952]
+[RESUMED step 10, loss=10.3952]
+Token data: 20658981 tokens (41.3 MB)
+  Compiling layer 1/12... (12 compiles)  Compiling layer 2/12... (17 compiles)  Compiling layer 3/12... (22 compiles)  Compiling layer 4/12... (27 compiles)  Compiling layer 5/12... (32 compiles)  Compiling layer 6/12... (37 compiles)  Compiling layer 7/12... (42 compiles)  Compiling layer 8/12... (47 compiles)  Compiling layer 9/12... (52 compiles)  Compiling layer 10/12... (57 compiles)  Compiling layer 11/12... (62 compiles)  Compiling layer 12/12... (67 compiles)  Compiled 60 kernels in 3774ms                    
+step 10   loss=10.2671
+  [batch 10: compile=3774ms train=1226.0ms (122.6ms/step) compiles=72]
+
+=== NEW Efficiency Report ===
+Total steps:     20
+Wall time:       10248 ms (10.2 s)
+Compile time:    7455 ms (72.7%)
+Train time:      2476 ms (24.2%)
+Avg train:       123.8 ms/step
+ANE TFLOPS:      0.85 sustained
+Total TFLOPS:    1.41 (ANE+CPU)
+ANE utilization: 5.4% of 15.8 TFLOPS

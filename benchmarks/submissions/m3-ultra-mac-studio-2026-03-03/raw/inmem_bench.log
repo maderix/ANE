@@ -1,0 +1,10 @@
+=== In-Memory ANE Benchmark ===
+
+Config         W (MB)    ms/eval   TFLOPS
+---------------------------------------------
+ 256ch x64sp     0.1  FAIL(-1)
+ 512ch x64sp     0.5  FAIL(-1)
+1024ch x64sp     2.0  FAIL(-1)
+2048ch x64sp     8.0  FAIL(-1)
+3072ch x64sp    18.0  FAIL(-1)
+4096ch x64sp    32.0  FAIL(-1)

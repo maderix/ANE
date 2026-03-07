@@ -1,0 +1,27 @@
+=== ANE Training: Stories110M (ANE-offloaded) ===
+dim=768 hidden=2048 heads=12 seq=256 vocab=32000 layers=12
+NEW: final_rmsnorm, classifier_fwd, softmax, rmsnorm_bwd on ANE
+Cannot open stories110M.bin
+Pretrained load failed, using random init
+Token data: 20658981 tokens (41.3 MB)
+Softmax kernel compiled (no weights)
+  Compiling layer 1/12... (13 compiles)  Compiling layer 2/12... (20 compiles)  Compiling layer 3/12... (27 compiles)  Compiling layer 4/12... (34 compiles)  Compiling layer 5/12... (41 compiles)  Compiling layer 6/12... (48 compiles)  Compiling layer 7/12... (55 compiles)  Compiling layer 8/12... (62 compiles)  Compiling layer 9/12... (69 compiles)  Compiling layer 10/12... (76 compiles)  Compiling layer 11/12... (83 compiles)  Compiling layer 12/12... (90 compiles)  Compiled 86 kernels in 4645ms                    
+step 0    loss=10.3901
+  [batch 10: compile=4645ms train=719.4ms (71.9ms/step) compiles=99]
+[exec() restart step 10, 99 compiles, loss=10.3946]
+[RESUMED step 10, loss=10.3946]
+Token data: 20658981 tokens (41.3 MB)
+Softmax kernel compiled (no weights)
+  Compiling layer 1/12... (13 compiles)  Compiling layer 2/12... (20 compiles)  Compiling layer 3/12... (27 compiles)  Compiling layer 4/12... (34 compiles)  Compiling layer 5/12... (41 compiles)  Compiling layer 6/12... (48 compiles)  Compiling layer 7/12... (55 compiles)  Compiling layer 8/12... (62 compiles)  Compiling layer 9/12... (69 compiles)  Compiling layer 10/12... (76 compiles)  Compiling layer 11/12... (83 compiles)  Compiling layer 12/12... (90 compiles)  Compiled 86 kernels in 4445ms                    
+step 10   loss=10.2666
+  [batch 10: compile=4445ms train=708.5ms (70.8ms/step) compiles=99]
+
+=== NEW Efficiency Report ===
+Total steps:     20
+Wall time:       10898 ms (10.9 s)
+Compile time:    9090 ms (83.4%)
+Train time:      1428 ms (13.1%)
+Avg train:       71.4 ms/step
+ANE TFLOPS:      1.48 sustained
+Total TFLOPS:    2.44 (ANE+CPU)
+ANE utilization: 9.4% of 15.8 TFLOPS
