@@ -94,6 +94,19 @@
       "peak_tflops_inmem": 12.17,
       "notes": "inmem_peak only, no training data submitted.",
       "contributor": "elijah-pelton"
+    },
+    {
+      "chip": "M5",
+      "cores": "10-core (4P+6E)",
+      "ram_gb": 24,
+      "macos": "26.3",
+      "ms_per_step": [125, 128],
+      "ane_ms": [9.1, 9.2],
+      "compile_ms": [3554, 3633],
+      "ane_tflops": [0.72, 0.74],
+      "ane_util_pct": [4.57, 4.70],
+      "notes": "MacBook Pro, static pipeline train_large, 20 steps, random init.",
+      "contributor": "log-wade"
     }
   ],
   "neural_engine_specs": {
