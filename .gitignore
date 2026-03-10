@@ -1,0 +1,52 @@
+# Build artifacts
+*.o
+*.dSYM/
+
+# Root-level compiled binaries
+ane_probe
+api_explore
+inmem_basic
+inmem_bench
+inmem_peak
+sram_bench
+sram_probe
+
+# Training binaries
+tiny_train
+tiny_train_m1
+train_large
+training/train_large
+training/train_large_ane
+training/train_opt
+training/train_double_buffer
+training/test_*
+!training/test_*.m
+
+# Dynamic training binaries
+training/training_dynamic/train
+
+# Test/research binaries
+test_chaining
+
+# Generated mlpackage files
+/tmp/ane_*.mlpackage
+
+# Benchmark results
+benchmark_results_*.txt
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Training data (downloaded separately)
+training/tinystories_data00.bin
+training/ane_stories110M_ckpt.bin
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
