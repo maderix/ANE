@@ -208,9 +208,15 @@ static bool load_checkpoint(const char *path, CkptHeader *hdr,
     return true;
 }
 
-#define MAX_COMPILES 100
+static inline int get_max_compiles_tiny(void) {
+    const char *env = getenv("ANE_MAX_COMPILES");
+    return env ? atoi(env) : 100;
+}
+static inline int get_accum_steps_tiny(void) {
+    const char *env = getenv("ANE_ACCUM_STEPS");
+    return env ? atoi(env) : 10;
+}
 #define KERNELS_PER_STEP 4
-#define ACCUM_STEPS 10
 
 // === Pipeline: background compile via GCD ===
 typedef struct {
@@ -241,6 +247,8 @@ int main(int argc, char *argv[]) {
         float lr = 1.0f;
         int start_step = 0;
         bool resuming = false;
+        int accum_steps = get_accum_steps_tiny();
+        int max_compiles = get_max_compiles_tiny();
 
         float *W1 = (float*)malloc(H * D * sizeof(float));
         float *W2 = (float*)malloc(D * H * sizeof(float));
@@ -288,12 +296,12 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < D*H; i++) W2[i] = 0.01f * cosf(i * 0.9f + 1.1f);
             printf("=== ANE Training: Pipeline Parallel + Grad Accumulation ===\n");
             printf("x:[%d,%d] -> W1:[%d,%d] -> ReLU -> W2:[%d,%d] -> y:[%d,%d]\n", S,D, H,D, D,H, S,D);
-            printf("Accum %d steps per recompile | Pipeline: compile overlaps ANE eval\n", ACCUM_STEPS);
+            printf("Accum %d steps per recompile | Pipeline: compile overlaps ANE eval\n", accum_steps);
             printf("ANE FP16 peak: 15.8 TFLOPS (M4) | Weights: %.1f KB\n\n", weight_bytes/1024.0);
             printf("FLOPs/step: ANE=%.0f (fwd+bwd)  CPU=%.0f (dW)  Total=%.0f\n",
                    ane_flops_per_step, cpu_flops_per_step, total_flops_per_step);
             printf("Steps: %d, LR: %.4f, exec() budget: %d compiles\n\n",
-                   total_steps, lr, MAX_COMPILES);
+                   total_steps, lr, max_compiles);
         }
 
         float *x = (float*)calloc(S * D, sizeof(float));
@@ -342,7 +350,7 @@ int main(int argc, char *argv[]) {
         int step = start_step;
         while (step < total_steps) {
             // Check compile budget
-            if (g_compile_count + KERNELS_PER_STEP > MAX_COMPILES) {
+            if (g_compile_count + KERNELS_PER_STEP > max_compiles) {
                 free_kern(k1_fwd); free_kern(k2_fwd);
                 free_kern(k1_bwd); free_kern(k2_bwd);
                 save_checkpoint(CKPT_PATH, step, last_loss, D, H, S, total_steps, lr, W1, W2,
@@ -368,7 +376,7 @@ int main(int argc, char *argv[]) {
             // So we need to update weights BEFORE launching background compile
 
             uint64_t t_batch = mach_absolute_time();
-            for (int a = 0; a < ACCUM_STEPS && step < total_steps; a++, step++) {
+            for (int a = 0; a < accum_steps && step < total_steps; a++, step++) {
                 ane_eval_k(k1_fwd, x, h, D, H, S);
                 for (int i = 0; i < S*H; i++) h_relu[i] = h[i] > 0 ? h[i] : 0;
                 ane_eval_k(k2_fwd, h_relu, y, H, D, S);
@@ -422,7 +430,7 @@ int main(int argc, char *argv[]) {
             // Pipeline: launch background compile with updated weights,
             // then immediately start NEXT batch's ANE evals with OLD kernels
             // while compile runs concurrently on GCD queue
-            bool can_pipeline = (step < total_steps) && (g_compile_count + KERNELS_PER_STEP <= MAX_COMPILES);
+            bool can_pipeline = (step < total_steps) && (g_compile_count + KERNELS_PER_STEP <= max_compiles);
 
             if (can_pipeline) {
                 // Snapshot weights for background compile
@@ -455,7 +463,7 @@ int main(int argc, char *argv[]) {
                     int steps_overlap = 0;
                     uint64_t t_overlap = mach_absolute_time();
 
-                    for (int a = 0; a < ACCUM_STEPS && step < total_steps; a++, step++) {
+                    for (int a = 0; a < accum_steps && step < total_steps; a++, step++) {
                         ane_eval_k(k1_fwd, x, h, D, H, S);
                         for (int i = 0; i < S*H; i++) h_relu[i] = h[i] > 0 ? h[i] : 0;
                         ane_eval_k(k2_fwd, h_relu, y, H, D, S);
@@ -562,7 +570,7 @@ int main(int argc, char *argv[]) {
         // === Efficiency Report ===
         printf("\n=== Efficiency Report ===\n");
         printf("Total steps:     %d\n", total_steps_done);
-        printf("Total batches:   %d (accum %d steps each)\n", total_batches, ACCUM_STEPS);
+        printf("Total batches:   %d (accum %d steps each)\n", total_batches, accum_steps);
         printf("Wall time:       %.0f ms\n", total_wall_ms);
         printf("Compile time:    %.0f ms (%.1f%%)\n", total_compile_ms, 100.0*total_compile_ms/total_wall_ms);
         printf("Train time:      %.0f ms (%.1f%%)\n", total_train_ms, 100.0*total_train_ms/total_wall_ms);
@@ -589,8 +597,8 @@ int main(int argc, char *argv[]) {
         printf("Weight params:   %d (%.1f KB FP16)\n",
                H*D + D*H, weight_bytes / 1024.0);
         printf("Compile amortization: %.1f ms compile / %d steps = %.2f ms/step overhead\n",
-               total_compile_ms / total_batches, ACCUM_STEPS,
-               total_compile_ms / total_batches / ACCUM_STEPS);
+               total_compile_ms / total_batches, accum_steps,
+               total_compile_ms / total_batches / accum_steps);
         printf("Compile fraction: %.1f%% of wall time\n", 100.0 * total_compile_ms / total_wall_ms);
         printf("Train fraction:   %.1f%% of wall time (useful work)\n", 100.0 * total_train_ms / total_wall_ms);
 
