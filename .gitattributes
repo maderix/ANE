@@ -1,0 +1,2 @@
+assets/models/*.bin filter=lfs diff=lfs merge=lfs -text
+assets/data/*.bin filter=lfs diff=lfs merge=lfs -text

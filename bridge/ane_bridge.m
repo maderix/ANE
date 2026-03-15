@@ -93,7 +93,7 @@ ANEKernelHandle *ane_bridge_compile_multi_weights(
 
         id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(
             g_ANEDesc, @selector(modelWithMILText:weights:optionsPlist:),
-            milData, wdict.count > 0 ? wdict : nil, nil);
+            milData, wdict.count > 0 ? wdict : @{}, nil);
         if (!desc) {
             fprintf(stderr, "ane_bridge: modelWithMILText failed\n");
             return NULL;
@@ -325,4 +325,47 @@ uint8_t *ane_bridge_build_weight_blob_transposed(const float *src, int rows, int
 
     *out_len = total;
     return buf;
+}
+
+uint8_t *ane_bridge_build_weight_blob_int8(const int8_t *src, int rows, int cols,
+                                            size_t *out_len) {
+    int wsize = rows * cols;  // 1 byte per int8 element
+    int total = 64 + wsize;   // 64-byte header + data
+    uint8_t *buf = (uint8_t *)calloc(total, 1);
+
+    // ANE int8 blob header
+    buf[0] = 0xEF; buf[1] = 0xBE; buf[2] = 0xAD; buf[3] = 0xDE;
+    buf[4] = 0x01;
+    buf[10] = 0x08;  // 8-bit element marker
+
+    memcpy(buf + 64, src, wsize);
+    *out_len = total;
+    return buf;
+}
+
+uint8_t *ane_bridge_build_weight_blob_quantized(const float *src, int rows, int cols,
+                                                 float *out_scale, size_t *out_len) {
+    // Find global max abs for symmetric quantization
+    float max_abs = 0.0f;
+    for (int i = 0; i < rows * cols; i++) {
+        float a = src[i] < 0 ? -src[i] : src[i];
+        if (a > max_abs) max_abs = a;
+    }
+    float scale = max_abs / 127.0f;
+    if (scale == 0.0f) scale = 1.0f;
+
+    // Quantize to int8
+    int wsize = rows * cols;
+    int8_t *qdata = (int8_t *)malloc(wsize);
+    for (int i = 0; i < wsize; i++) {
+        float v = src[i] / scale;
+        if (v > 127.0f) v = 127.0f;
+        if (v < -128.0f) v = -128.0f;
+        qdata[i] = (int8_t)(v + (v >= 0 ? 0.5f : -0.5f));
+    }
+
+    uint8_t *blob = ane_bridge_build_weight_blob_int8(qdata, rows, cols, out_len);
+    free(qdata);
+    *out_scale = scale;
+    return blob;
 }

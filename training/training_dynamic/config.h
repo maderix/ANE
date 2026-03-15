@@ -1,4 +1,5 @@
-// config.h — Stories110M model config, structs, ANE init
+// config.h — Model-agnostic structs, derived sizes, ANE init
+// Model-specific dims come from models/*.h, selected via -DMODEL_HEADER
 #pragma once
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -15,22 +16,21 @@
 #include <fcntl.h>
 #include <arm_neon.h>
 
-// Stories110M config
-#define DIM 768
-#define HIDDEN 2048
-#define HEADS 12
-#define HD (DIM/HEADS)
-#define SEQ 256
-#define NLAYERS 12
-#define VOCAB 32000
+// Include selected model config
+// MODEL_HEADER is set by Makefile via -include models/xxx.h
+#ifndef MODEL_NAME
+#error "No model selected. Build with: make MODEL=qwen3_06b (or stories110m)"
+#endif
 
-// Weight sizes per layer
-#define WQ_SZ (DIM*DIM)
-#define WO_SZ (DIM*DIM)
+// Derived weight sizes per layer (GQA-aware)
+#define WQ_SZ (Q_DIM*DIM)
+#define WK_SZ (KV_DIM*DIM)
+#define WV_SZ (KV_DIM*DIM)
+#define WO_SZ (DIM*Q_DIM)
 #define W1_SZ (HIDDEN*DIM)
 #define W2_SZ (DIM*HIDDEN)
 #define W3_SZ (HIDDEN*DIM)
-#define LAYER_PARAMS (4*WQ_SZ + W1_SZ + W2_SZ + W3_SZ + 2*DIM)
+#define LAYER_PARAMS (WQ_SZ + WK_SZ + WV_SZ + WO_SZ + W1_SZ + W2_SZ + W3_SZ + 2*DIM)
 
 // Attention score channels for SDPA backward
 #define SCORE_CH (HEADS*SEQ)
@@ -62,6 +62,18 @@ typedef struct {
 // ANE kernel handle
 typedef struct { void *model; IOSurfaceRef ioIn, ioOut; void *request; void *tmpDir; } Kern;
 
+// Per-layer IOSurfaces for pre-staged weights
+typedef struct {
+    IOSurfaceRef sdpaFwd_in, woFwd_in, ffnFused_in;
+    IOSurfaceRef ffnBwdW2t_in, ffnBwdW13t_in, wotBwd_in, qBwd_in, kvBwd_in;
+} PerLayerSurfaces;
+
+// Per-layer ANE requests (bound to per-layer IOSurfaces)
+typedef struct {
+    void *sdpaFwd, *woFwd, *ffnFused;
+    void *ffnBwdW2t, *ffnBwdW13t, *wotBwd, *qBwd, *kvBwd;
+} PerLayerRequests;
+
 // Checkpoint header
 typedef struct {
     int magic, version, step, total_steps;
@@ -69,13 +81,9 @@ typedef struct {
     float lr, loss;
     double cum_compile, cum_train, cum_wall;
     int cum_steps, cum_batches, adam_t;
-    int pad[3];
+    int kv_heads, head_dim, q_dim;  // GQA fields
+    // Note: was int pad[3] in v3, now stores GQA info in v4+
 } CkptHdr;
-
-// llama2.c model file header
-typedef struct {
-    int dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len;
-} Llama2Config;
 
 // Globals
 static Class g_D, g_I, g_AR, g_AIO;
@@ -97,8 +105,8 @@ static void adam_free(AdamState *s) { free(s->m); free(s->v); }
 
 static LayerWeights layer_weights_alloc(void) {
     LayerWeights w;
-    w.Wq=(float*)malloc(WQ_SZ*4); w.Wk=(float*)malloc(WQ_SZ*4);
-    w.Wv=(float*)malloc(WQ_SZ*4); w.Wo=(float*)malloc(WO_SZ*4);
+    w.Wq=(float*)malloc(WQ_SZ*4); w.Wk=(float*)malloc(WK_SZ*4);
+    w.Wv=(float*)malloc(WV_SZ*4); w.Wo=(float*)malloc(WO_SZ*4);
     w.W1=(float*)malloc(W1_SZ*4); w.W2=(float*)malloc(W2_SZ*4); w.W3=(float*)malloc(W3_SZ*4);
     w.rms_att=(float*)malloc(DIM*4); w.rms_ffn=(float*)malloc(DIM*4);
     return w;
@@ -109,7 +117,7 @@ static void layer_weights_free(LayerWeights *w) {
 }
 static LayerAdam layer_adam_alloc(void) {
     LayerAdam a;
-    a.Wq=adam_alloc(WQ_SZ); a.Wk=adam_alloc(WQ_SZ); a.Wv=adam_alloc(WQ_SZ); a.Wo=adam_alloc(WO_SZ);
+    a.Wq=adam_alloc(WQ_SZ); a.Wk=adam_alloc(WK_SZ); a.Wv=adam_alloc(WV_SZ); a.Wo=adam_alloc(WO_SZ);
     a.W1=adam_alloc(W1_SZ); a.W2=adam_alloc(W2_SZ); a.W3=adam_alloc(W3_SZ);
     a.rms_att=adam_alloc(DIM); a.rms_ffn=adam_alloc(DIM);
     return a;
@@ -123,8 +131,8 @@ static LayerActs layer_acts_alloc(void) {
     LayerActs a;
     a.layer_in=(float*)malloc(SEQ*DIM*4);
     a.xnorm=(float*)malloc(SEQ*DIM*4);
-    a.Q=(float*)malloc(SEQ*DIM*4); a.K=(float*)malloc(SEQ*DIM*4); a.V=(float*)malloc(SEQ*DIM*4);
-    a.attn_out=(float*)malloc(SEQ*DIM*4); a.o_out=(float*)malloc(SEQ*DIM*4);
+    a.Q=(float*)malloc(SEQ*Q_DIM*4); a.K=(float*)malloc(SEQ*KV_DIM*4); a.V=(float*)malloc(SEQ*KV_DIM*4);
+    a.attn_out=(float*)malloc(SEQ*Q_DIM*4); a.o_out=(float*)malloc(SEQ*DIM*4);
     a.x2=(float*)malloc(SEQ*DIM*4); a.x2norm=(float*)malloc(SEQ*DIM*4);
     a.h1=(float*)malloc(SEQ*HIDDEN*4); a.h3=(float*)malloc(SEQ*HIDDEN*4);
     a.silu_out=(float*)malloc(SEQ*HIDDEN*4); a.ffn_out=(float*)malloc(SEQ*DIM*4);
@@ -138,15 +146,15 @@ static void layer_acts_free(LayerActs *a) {
 }
 static LayerGrads layer_grads_alloc(void) {
     LayerGrads g;
-    g.Wq=(float*)calloc(WQ_SZ,4); g.Wk=(float*)calloc(WQ_SZ,4);
-    g.Wv=(float*)calloc(WQ_SZ,4); g.Wo=(float*)calloc(WO_SZ,4);
+    g.Wq=(float*)calloc(WQ_SZ,4); g.Wk=(float*)calloc(WK_SZ,4);
+    g.Wv=(float*)calloc(WV_SZ,4); g.Wo=(float*)calloc(WO_SZ,4);
     g.W1=(float*)calloc(W1_SZ,4); g.W2=(float*)calloc(W2_SZ,4); g.W3=(float*)calloc(W3_SZ,4);
     g.rms_att=(float*)calloc(DIM,4); g.rms_ffn=(float*)calloc(DIM,4);
     return g;
 }
 static void layer_grads_zero(LayerGrads *g) {
-    memset(g->Wq,0,WQ_SZ*4);memset(g->Wk,0,WQ_SZ*4);
-    memset(g->Wv,0,WQ_SZ*4);memset(g->Wo,0,WO_SZ*4);
+    memset(g->Wq,0,WQ_SZ*4);memset(g->Wk,0,WK_SZ*4);
+    memset(g->Wv,0,WV_SZ*4);memset(g->Wo,0,WO_SZ*4);
     memset(g->W1,0,W1_SZ*4);memset(g->W2,0,W2_SZ*4);memset(g->W3,0,W3_SZ*4);
     memset(g->rms_att,0,DIM*4);memset(g->rms_ffn,0,DIM*4);
 }

@@ -1,5 +1,5 @@
 CC = xcrun clang
-CFLAGS = -O2 -Wall -Wno-deprecated-declarations -fobjc-arc
+CFLAGS = -O2 -Wall -DACCELERATE_NEW_LAPACK -fobjc-arc
 FRAMEWORKS = -framework Foundation -framework CoreML -framework IOSurface
 LDFLAGS = $(FRAMEWORKS) -ldl
 

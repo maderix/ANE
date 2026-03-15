@@ -53,13 +53,13 @@ static void rmsnorm_bwd(float *dx, float *dw, const float *dy, const float *x, c
     free(ss); free(rrms); free(dot);
 }
 
-static void adam_update(float *w, const float *g, AdamState *s, int t, float lr, float b1, float b2, float eps) {
+static void adam_update(float *w, const float *g, AdamState *s, int t, float lr, float b1, float b2, float eps, float wd) {
     float bc1 = 1.0f - powf(b1, t), bc2 = 1.0f - powf(b2, t);
     for (size_t i=0; i<s->n; i++) {
         s->m[i] = b1*s->m[i] + (1-b1)*g[i];
         s->v[i] = b2*s->v[i] + (1-b2)*g[i]*g[i];
         float mh = s->m[i]/bc1, vh = s->v[i]/bc2;
-        w[i] -= lr * mh / (sqrtf(vh) + eps);
+        w[i] -= lr * (mh / (sqrtf(vh) + eps) + wd * w[i]);
     }
 }
 
@@ -160,5 +160,25 @@ static void embed_backward(float *d_embed, const float *dx, const uint16_t *toke
         int tok = tokens[t];
         for (int d = 0; d < dim; d++)
             d_embed[tok*dim + d] += dx[d*seq + t];
+    }
+}
+
+// RoPE backward (in-place): inverse rotation on dQ/dK gradients
+// Data layout: [DIM, SEQ] channel-first, DIM = nheads * hd
+static void rope_backward_inplace(float *dx, int seq, int dim, int hd) {
+    int nheads = dim / hd;
+    for (int h = 0; h < nheads; h++) {
+        for (int i = 0; i < hd/2; i++) {
+            float freq = 1.0f / powf(10000.0f, 2.0f * i / (float)hd);
+            for (int p = 0; p < seq; p++) {
+                float theta = p * freq;
+                float cos_t = cosf(theta), sin_t = sinf(theta);
+                int idx0 = (h * hd + 2 * i) * seq + p;
+                int idx1 = (h * hd + 2 * i + 1) * seq + p;
+                float v0 = dx[idx0], v1 = dx[idx1];
+                dx[idx0] = v0 * cos_t + v1 * sin_t;
+                dx[idx1] = -v0 * sin_t + v1 * cos_t;
+            }
+        }
     }
 }

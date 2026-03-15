@@ -77,6 +77,19 @@ uint8_t *ane_bridge_build_weight_blob(const float *src, int rows, int cols,
 uint8_t *ane_bridge_build_weight_blob_transposed(const float *src, int rows, int cols,
                                                    size_t *out_len);
 
+// Build an int8 weight blob in ANE format (64-byte header + int8 data per chunk)
+// src: int8 weights [rows x cols], scale: dequantization scale, zero_point: int8 zero
+// For use with constexpr_affine_dequantize in MIL
+// Returns allocated buffer and sets out_len. Caller must free().
+uint8_t *ane_bridge_build_weight_blob_int8(const int8_t *src, int rows, int cols,
+                                            size_t *out_len);
+
+// Quantize float32 weights to int8 and build ANE blob in one step
+// Computes per-channel (axis=0) scale = max(abs(row)) / 127
+// Returns allocated buffer, sets out_len and out_scale. Caller must free().
+uint8_t *ane_bridge_build_weight_blob_quantized(const float *src, int rows, int cols,
+                                                 float *out_scale, size_t *out_len);
+
 // Free a blob allocated by ane_bridge_build_weight_blob*
 void ane_bridge_free_blob(void *ptr);
 

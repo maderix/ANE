@@ -36,6 +36,7 @@ Some coverage of this project has overstated its implications. To be clear:
 The honest results — including all limitations — are documented in the accompanying articles:
 - [Part 1: Reverse Engineering](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine)
 - [Part 2: Benchmarks](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615)
+- [Part 3: Training](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-c8b)
 
 ### On Maintenance
 
@@ -55,29 +56,46 @@ This is MIT licensed for a reason. Everyone now has access to AI-assisted develo
 
 ## What This Is
 
-A from-scratch implementation of transformer training (forward + backward pass) running on the ANE in Apple Silicon. The ANE is a 15.8 TFLOPS (M4) inference accelerator that Apple does not expose for training. This project reverse-engineers the `_ANEClient` / `_ANECompiler` private APIs and the MIL (Model Intermediate Language) format to run custom compute graphs — including backpropagation — directly on ANE hardware.
+A from-scratch implementation of transformer training (forward + backward pass) running on the ANE in Apple Silicon. The ANE is a 15.8 TFLOPS FP16 (M4) inference accelerator that Apple does not expose for training. This project reverse-engineers the `_ANEClient` / `_ANECompiler` private APIs and the MIL (Model Intermediate Language) format to run custom compute graphs — including backpropagation — directly on ANE hardware.
 
-**Current results — Stories110M (12-layer, dim=768, seq=256, 109M params):**
-- Static pipeline: **91 ms/step** (M3 Ultra), **106 ms/step** (M4)
-- Dynamic pipeline: **110 ms/step**, no recompilation
-- 72 ANE kernels per step (static), 9 shared kernels (dynamic)
+**Current results:**
+
+| Model | Params | ms/step | Pipeline |
+|-------|--------|---------|----------|
+| Stories110M (12L, dim=768, MHA 12/12) | 109M | **91 ms** | Dynamic (no recompile) |
+| Qwen3-0.6B (28L, dim=1024, GQA 16/8) | 596M | **412 ms** | Dynamic (no recompile) |
+
 - All forward and backward dx passes on ANE, dW gradients on CPU (Accelerate cblas)
 - Adam optimizer, gradient accumulation, checkpoint/resume via exec() restart
+- GQA (Grouped-Query Attention) support with per-head tiling/reduction
+- GPU↔ANE zero-copy pipeline via shared IOSurface (GPU prefill → ANE decode)
+
+**INT8 W8A8 quantization — 1.88x throughput (M4, H16G):**
+
+| Config | FP16 | INT8 W8A8 | Speedup |
+|--------|------|-----------|---------|
+| 128x conv 512ch 64x64 | 18.6 TOPS, 14.8ms | 35.1 TOPS, 7.8ms | **1.88x** |
+| 64x conv 512ch 64x64 | 18.4 TOPS, 7.5ms | 34.1 TOPS, 4.0ms | **1.85x** |
+
+INT8 activations halve L2 SRAM bandwidth between tiles via MIL `quantize`/`dequantize` ops. Weights use `constexpr_affine_dequantize` (int8 stored, fp16 at compile time).
 
 ## Architecture
 
-The training loop uses 6 ANE kernels per step:
+The dynamic pipeline uses shared ANE kernels with weights packed into spatial dimensions (no recompilation when weights change):
 
-| Kernel | Function | Weights |
-|--------|----------|---------|
-| `kFwdAttn` | RMSNorm + QKV projection + SDPA + output projection | Wq, Wk, Wv, Wo, rms1, mask |
-| `kFwdFFN` | RMSNorm + SwiGLU FFN (W1, W3, SiLU, W2) | W1, W2, W3, rms2 |
-| `kFFNBwd` | FFN backward (W2^T + SiLU_bwd + W1^T + W3^T) | W2^T, W1^T, W3^T |
-| `kSdpaBwd1` | Wo^T + SDPA backward part 1 (dV, probs, dp) | Wo^T, mask |
-| `kSdpaBwd2` | SDPA backward part 2 (softmax grad, dQ, dK) | — |
-| `kQKVb` | QKV backward (Wq^T + Wk^T + Wv^T → dx) | Wq^T, Wk^T, Wv^T |
+**MHA models (Stories110M) — 6 kernels per layer:**
 
-CPU handles: RMSNorm backward, residual connections, loss computation, dW gradient accumulation (cblas_sgemm), Adam optimizer updates.
+| Kernel | Function |
+|--------|----------|
+| `sdpaFwd` | QKV projection + SDPA + output projection |
+| `ffnFused` | SwiGLU FFN (W1, W3, SiLU, W2) |
+| `ffnBwdW2t` / `ffnBwdW13t` | FFN backward (split for memory) |
+| `sdpaBwd1` / `sdpaBwd2` | SDPA backward |
+
+**GQA models (Qwen3-0.6B) — 10 kernels per layer:**
+Adds separate `woFwd`, `qBwd`, `kvBwd` kernels for grouped-query attention (Q_DIM ≠ DIM).
+
+CPU handles: RMSNorm forward/backward, residual connections (DeepNet α scaling), loss computation, dW gradient accumulation (cblas_sgemm), Adam optimizer updates.
 
 Key optimizations:
 - **Channel-first CPU layout** — matches ANE IOSurface `[1,C,1,S]` format, eliminates all transpose overhead
@@ -149,13 +167,24 @@ See [training/README.md](training/README.md) for detailed training instructions.
 Requires macOS 15+ on Apple Silicon (tested on M4).
 
 ```bash
-# Build the main training program
-xcrun clang -O2 -framework Foundation -framework IOSurface \
-  -framework CoreML -framework Accelerate -ldl -lobjc \
-  -o train_large training/train_large.m
+# Dynamic pipeline (recommended) — model selected at build time
+cd training/training_dynamic
+make MODEL=stories110m    # Stories110M (12L, MHA, 109M params)
+make MODEL=qwen3_06b      # Qwen3-0.6B (28L, GQA, 596M params)
+./train --scratch          # train from random init
+./train --resume           # resume from checkpoint
 
-# Run
-./train_large
+# Static pipeline (legacy — recompiles weights each step)
+cd training && make train_large
+./train_large ane_stories110M_ckpt.bin 256 100 1e-4
+
+# INT8 benchmark
+xcrun clang -O2 -fobjc-arc -framework Foundation -framework IOSurface -ldl \
+  -o ane_int8_bench ane_int8_bench.m
+./ane_int8_bench
+
+# Bridge library (C-callable ANE API)
+cd bridge && make
 ```
 
 No external dependencies. Uses only system frameworks + private ANE APIs resolved at runtime via `objc_msgSend`.
@@ -164,28 +193,40 @@ No external dependencies. Uses only system frameworks + private ANE APIs resolve
 
 1. **MIL generation** — Objective-C code constructs MIL program text at runtime, specifying convolutions (for linear layers), matmul (for attention), softmax, element-wise ops
 2. **In-memory compilation** — `_ANEInMemoryModelDescriptor` compiles MIL text + weight blobs directly to ANE programs, no disk mlmodelc needed
-3. **IOSurface I/O** — Input/output tensors passed via IOSurface shared memory in `[1, channels, 1, spatial]` format (fp16)
-4. **Weight embedding** — Weights baked into ANE programs as BLOBFILE constants; recompiled each batch when weights change
+3. **IOSurface I/O** — Input/output tensors passed via IOSurface shared memory in `[1, channels, 1, spatial]` format (fp16 or fp32; fp16 direct I/O is ~37% faster)
+4. **Dynamic weights** — Activations and weights packed into a single spatial input dimension, sliced apart inside the MIL kernel. Weights change without recompilation.
 5. **Gradient flow** — Forward taps expose intermediates needed for backward; backward kernels compute dx (input gradients) on ANE; dW (weight gradients) computed on CPU via cblas
+6. **INT8 quantization** — `constexpr_affine_dequantize` for int8 weights, `quantize`/`dequantize` between layers for int8 activation caching in L2 SRAM (1.88x throughput)
 
 ## Limitations
 
-- **SDPA causal masking** — ANE hardware ignores `attn_mask` in SDPA ops; causal attention is decomposed into separate Q@K^T (ANE) → mask+softmax (ANE via add+softmax) → scores@V (ANE)
+- **SDPA causal masking** — ANE hardware ignores `attn_mask` in SDPA ops; causal attention is decomposed into separate Q@K^T (ANE) → mask+softmax (CPU) → scores@V (ANE)
 - **~119 compile limit** — ANE compiler leaks resources; worked around via `exec()` restart with checkpoint
-- **Compile overhead** — Static pipeline recompiles 60+ kernels every 10 steps (~3.7s); dynamic pipeline avoids this
-- **Low utilization** — Training sustains ~1-2 TFLOPS out of 15.8+ peak due to CPU fallbacks and I/O overhead
+- **FP16 gradient underflow** — backward matmuls underflow in fp16; fixed with global loss scaling (`256 * NLAYERS`)
+- **Single-input constraint** — multi-input ANE requests cause 0x1d error; inputs packed into spatial dimension instead
 
-## Performance History
+## Performance
 
-| Optimization | ms/step | ANE util |
-|---|---|---|
-| Baseline (vDSP transpose) | 33.5 | 3.1% |
-| Channel-first layout | 20.3 | 5.2% |
-| vDSP vectorized RMSNorm | 14.2 | 7.4% |
-| GCD async cblas overlap | 11.4 | 9.2% |
-| ANE RMSNorm fusion | 11.4 | 9.2% |
-| Wo^T fusion (7→6 kernels) | 11.4 | 9.2% |
-| Deferred cblas wait | **9.3** | **11.2%** |
+**Training throughput (M4):**
+
+| Model | Params | ms/step | Layers | Kernels/layer |
+|-------|--------|---------|--------|---------------|
+| Stories110M | 109M | 91 ms | 12 | 6 (MHA) |
+| Qwen3-0.6B | 596M | 412 ms | 28 | 10 (GQA) |
+
+**ANE peak throughput (M4, H16G):**
+
+| Precision | Peak TOPS | Config |
+|-----------|-----------|--------|
+| FP16 | 18.6 | 128x conv 512ch 64x64 |
+| INT8 W8A8 | 35.1 | 128x conv 512ch 64x64 |
+
+**GPU↔ANE inference pipeline (M4, seq=256):**
+
+| Model | GPU Prefill | ANE Decode | Total |
+|-------|------------|------------|-------|
+| Stories110M | 6.7ms | 1.9ms | 8.8ms |
+| Qwen3-0.6B | 9.7ms | 2.3ms | 12.0ms |
 
 ## Disclaimer
 
@@ -198,4 +239,5 @@ MIT — see [LICENSE](LICENSE)
 ---
 
 *Built by a human + Claude, one weekend at a time.*
+
 
